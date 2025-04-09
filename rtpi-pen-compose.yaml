@@ -1,0 +1,373 @@
+version: '3.8'
+
+networks:
+  rtpi_bridge:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "172.17.0.0/16"
+          gateway: "172.17.0.1"
+  rtpi_host:
+    driver: host
+  kasm_default_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "172.18.0.0/16"
+          gateway: "172.18.0.1"
+  rtpi_none:
+    driver: "null"
+  sysreptor_default:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "172.20.0.0/16"
+          gateway: "172.20.0.1"
+  npm_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "172.21.0.0/16"
+          gateway: "172.21.0.1"
+
+volumes:
+  # Hashed volumes
+  252d9232728ad61b918beab6c410004274a29bc54e555baf07d8293894f8356a:
+    driver: local
+    driver_opts:
+      type: none
+      device: /var/lib/docker/volumes/252d9232728ad61b918beab6c410004274a29bc54e555baf07d8293894f8356a/_data
+      o: bind
+  52e1a97102b402fbb572830d38cc42848c2f91e40e55dcce412d3355954bbcdf:
+    driver: local
+    driver_opts:
+      type: none
+      device: /var/lib/docker/volumes/52e1a97102b402fbb572830d38cc42848c2f91e40e55dcce412d3355954bbcdf/_data
+      o: bind
+  3f135bde4b14a9d97bdf75da01a9f813db2bfac3a1f37ab98ff1ba6230cd03fb:
+    driver: local
+    driver_opts:
+      type: none
+      device: /var/lib/docker/volumes/3f135bde4b14a9d97bdf75da01a9f813db2bfac3a1f37ab98ff1ba6230cd03fb/_data
+      o: bind
+  # Named volumes
+  sysreptor-app-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /var/lib/docker/volumes/sysreptor-app-data/_data
+      o: bind
+  sysreptor-db-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /var/lib/docker/volumes/sysreptor-db-data/_data
+      o: bind
+  sysreptor-caddy-data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /var/lib/docker/volumes/sysreptor-caddy-data/_data
+      o: bind
+  kasm_db_1.15.0:
+    driver: local
+    driver_opts:
+      type: none
+      device: /var/lib/docker/volumes/kasm_db_1.15.0/_data
+      o: bind
+  portainer_data:
+    driver: local
+    driver_opts:
+      type: none
+      device: /var/lib/docker/volumes/portainer_data/_data
+      o: bind
+  npm_data:
+    driver: local
+  npm_letsencrypt:
+    driver: local
+  npm_mysql:
+    driver: local
+
+services:
+  # Nginx Proxy Manager
+  npm_app:
+    image: 'jc21/nginx-proxy-manager:latest'
+    container_name: npm_app
+    restart: unless-stopped
+    ports:
+      - '80:80'   # Public HTTP Port
+      - '81:81'   # Admin Web Port
+      - '443:443' # Public HTTPS Port
+    environment:
+      DB_MYSQL_HOST: "npm_db"
+      DB_MYSQL_PORT: 3306
+      DB_MYSQL_USER: "npm"
+      DB_MYSQL_PASSWORD: "T0t4llyCh4ng3Th15P455word"
+      DB_MYSQL_NAME: "npm"
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    networks:
+      - npm_network
+      - rtpi_bridge
+    depends_on:
+      - npm_db
+
+  npm_db:
+    image: 'jc21/mariadb-aria:latest'
+    container_name: npm_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: 'T0t4llyCh4ng3Th15P455word'
+      MYSQL_DATABASE: 'npm'
+      MYSQL_USER: 'npm'
+      MYSQL_PASSWORD: 'T0t4llyCh4ng3Th15P455word'
+    volumes:
+      - npm_mysql:/var/lib/mysql
+    networks:
+      - npm_network
+
+  # Docker stack
+  kasm_agent:
+    image: kasmweb/agent:1.15.0
+    container_name: kasm_agent
+    restart: unless-stopped
+    networks:
+      kasm_default_network:
+        ipv4_address: 172.18.0.2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - /opt/kasm/1.15.0/conf/nginx:/etc/nginx/conf.d:rw
+      - /opt/kasm/1.15.0:/opt/kasm/current:rw
+
+  kasm_api:
+    image: kasmweb/api:1.15.0
+    container_name: kasm_api
+    restart: unless-stopped
+    networks:
+      kasm_default_network:
+        ipv4_address: 172.18.0.7
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - /opt/kasm/1.15.0:/opt/kasm/current:rw
+      - /opt/kasm/1.15.0/tmp/api:/tmp:rw
+    depends_on:
+      - kasm_db
+
+  kasm_db:
+    image: postgres:12-alpine
+    container_name: kasm_db
+    restart: unless-stopped
+    networks:
+      kasm_default_network:
+        ipv4_address: 172.18.0.4
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - kasm_db_1.15.0:/var/lib/postgresql/data:z
+      - /opt/kasm/1.15.0/log/postgres:/var/log/postgres:rw
+      - /opt/kasm/1.15.0/conf/database/data.sql:/docker-entrypoint-initdb.d/data.sql:rw
+      - /opt/kasm/1.15.0/certs/db_server.crt:/etc/ssl/certs/db_server.crt:rw
+      - /opt/kasm/1.15.0/certs/db_server.key:/etc/ssl/certs/db_server.key:rw
+      - /opt/kasm/1.15.0/conf/database:/tmp:rw
+      - /opt/kasm/1.15.0/conf/database/pg_hba.conf:/var/lib/postgresql/conf/pg_hba.conf:rw
+      - /opt/kasm/1.15.0/conf/database/postgresql.conf:/var/lib/postgresql/conf/postgresql.conf:rw
+    command: postgres -c ssl=on -c ssl_cert_file=/etc/ssl/certs/db_server.crt -c ssl_key_file=/etc/ssl/certs/db_server.key -c config_file=/var/lib/postgresql/conf/postgresql.conf -c hba_file=/var/lib/postgresql/conf/pg_hba.conf
+
+  kasm_guac:
+    image: kasmweb/kasm-guac:1.15.0
+    container_name: kasm_guac
+    restart: unless-stopped
+    networks:
+      kasm_default_network:
+        ipv4_address: 172.18.0.5
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - /opt/kasm/1.15.0:/opt/kasm/current:rw
+      - /opt/kasm/1.15.0/tmp/guac:/tmp:rw
+
+  kasm_manager:
+    image: kasmweb/manager:1.15.0
+    container_name: kasm_manager
+    restart: unless-stopped
+    networks:
+      kasm_default_network:
+        ipv4_address: 172.18.0.8
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - /opt/kasm/1.15.0:/opt/kasm/current:rw
+    depends_on:
+      - kasm_db
+
+  kasm_proxy:
+    image: kasmweb/nginx:1.25.3
+    container_name: kasm_proxy
+    restart: unless-stopped
+    networks:
+      kasm_default_network:
+        ipv4_address: 172.18.0.9
+    ports:
+      - "8443:443"  # Changed from 443:443 to avoid conflict with npm_app
+    volumes:
+      - /opt/kasm/1.15.0/conf/nginx:/etc/nginx/conf.d:ro
+      - /opt/kasm/1.15.0/certs/kasm_nginx.crt:/etc/ssl/certs/kasm_nginx.crt:rw
+      - /opt/kasm/1.15.0/certs/kasm_nginx.key:/etc/ssl/private/kasm_nginx.key:rw
+      - /opt/kasm/1.15.0/www:/srv/www:ro
+      - /opt/kasm/1.15.0/log/logrotate:/var/log/external/logrotate:rw
+      - /opt/kasm/1.15.0/log/nginx:/var/log/external/nginx:rw
+    depends_on:
+      - kasm_api
+      - kasm_manager
+      - kasm_share
+      - kasm_guac
+      - kasm_agent
+
+  kasm_redis:
+    image: redis:5-alpine
+    container_name: kasm_redis
+    restart: unless-stopped
+    networks:
+      kasm_default_network:
+        ipv4_address: 172.18.0.3
+    volumes:
+      - 252d9232728ad61b918beab6c410004274a29bc54e555baf07d8293894f8356a:/data
+    command: sh -c 'redis-server --requirepass ${REDIS_PASSWORD}'
+
+  kasm_share:
+    image: kasmweb/share:1.15.0
+    container_name: kasm_share
+    restart: unless-stopped
+    networks:
+      kasm_default_network:
+        ipv4_address: 172.18.0.6
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - /opt/kasm/1.15.0:/opt/kasm/current:rw
+    depends_on:
+      - kasm_db
+      - kasm_redis
+
+  # Other containers in docker stack
+  node:
+    image: node:latest
+    container_name: node
+    restart: unless-stopped
+    networks:
+      rtpi_bridge:
+        ipv4_address: 172.17.0.3
+    ports:
+      - "3500:3500"
+
+  portainer:
+    image: portainer/portainer-ce:2.21.0
+    container_name: portainer
+    restart: unless-stopped
+    networks:
+      rtpi_bridge:
+        ipv4_address: 172.17.0.2
+    ports:
+      - "8000:8000"
+      - "9443:9443"
+    volumes:
+      - portainer_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  ps-empire:
+    image: bcsecurity/empire:latest
+    container_name: ps-empire
+    restart: unless-stopped
+    networks:
+      rtpi_bridge:
+        ipv4_address: 172.17.0.5
+    ports:
+      - "1337:1337"
+      - "5000:5000"
+    volumes:
+      - 52e1a97102b402fbb572830d38cc42848c2f91e40e55dcce412d3355954bbcdf:/empire
+    command: ./ps-empire server
+
+  # Sysreptor stack
+  sysreptor-app:
+    image: syslifters/sysreptor:2024.96
+    container_name: sysreptor-app
+    restart: unless-stopped
+    networks:
+      sysreptor_default:
+        ipv4_address: 172.20.0.3
+    ports:
+      - "127.0.0.1:9000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - sysreptor-app-data:/data:z
+    depends_on:
+      - sysreptor-db
+      - sysreptor-redis
+    command: /bin/bash /app/api/start.sh
+
+  sysreptor-caddy:
+    image: caddy:latest
+    container_name: sysreptor-caddy
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - sysreptor-caddy-data:/data:z
+      - /opt/sysreptor/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:rw
+    command: caddy reverse-proxy --from :7777 --to :9000
+
+  sysreptor-db:
+    image: postgres:14
+    container_name: sysreptor-db
+    restart: unless-stopped
+    networks:
+      sysreptor_default:
+        ipv4_address: 172.20.0.2
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    volumes:
+      - sysreptor-db-data:/data:z
+      - 3f135bde4b14a9d97bdf75da01a9f813db2bfac3a1f37ab98ff1ba6230cd03fb:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=sysreptorpassword
+      - POSTGRES_USER=sysreptor
+      - POSTGRES_DB=sysreptor
+
+  sysreptor-redis:
+    image: bitnami/redis:7.2
+    container_name: sysreptor-redis
+    restart: unless-stopped
+    networks:
+      sysreptor_default:
+        ipv4_address: 172.20.0.4
+    environment:
+      - REDIS_PASSWORD=sysreptorredispassword
