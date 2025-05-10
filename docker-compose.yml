@@ -1,5 +1,3 @@
-version: '3.8'
-
 networks:
   rtpi_bridge:
     driver: bridge
@@ -8,21 +6,14 @@ networks:
   kasm_default_network:
     driver: bridge
   rtpi_none:
-    driver: null
+    driver: "null"
   sysreptor_default:
     driver: bridge
   npm_network:
     driver: bridge
 
 volumes:
-  # Hashed volumes
-  252d9232728ad61b918beab6c41000427422a:
-    driver: local
-  52e1a97102b402fbb572830d36cc42648c2f9:
-    driver: local
-  3f135bde4b14a9d97bdf75da01a9f813db2bf:
-    driver: local
-  # Named volumes
+  # Named volumes for persistence
   sysreptor-app-data:
     driver: local
   sysreptor-db-data:
@@ -39,8 +30,30 @@ volumes:
     driver: local
   npm_mysql:
     driver: local
+  empire_data:
+    driver: local
+  registry_data:
+    driver: local
 
 services:
+  # Main orchestrator container (rtpi-pen)
+  rtpi-pen:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cmndcntrl/rtpi-pen:latest
+    container_name: rtpi-pen
+    restart: unless-stopped
+    networks:
+      - rtpi_bridge
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - ./configs:/opt/rtpi-pen/configs:ro
+      - ./setup:/opt/rtpi-pen/setup:ro
+    command: ["portainer"]
+    ports:
+      - "9443:9443" # Portainer HTTPS UI
+
   # Nginx Proxy Manager
   npm_app:
     image: 'jc21/nginx-proxy-manager:latest'
@@ -79,7 +92,19 @@ services:
     networks:
       - npm_network
 
-  # Docker stack
+  # Docker Registry
+  registry:
+    image: registry:latest
+    container_name: local-registry
+    restart: unless-stopped
+    networks:
+      - rtpi_bridge
+    ports:
+      - "5000:5000"
+    volumes:
+      - registry_data:/var/lib/registry
+
+  # Kasm Workspaces stack
   kasm_agent:
     image: kasmweb/agent:1.15.0
     container_name: kasm_agent
@@ -175,7 +200,7 @@ services:
       - kasm_default_network
       - rtpi_bridge
     ports:
-      - "443:443"  # Changed from 443:443 to avoid conflict with npm_app
+      - "8443:443"  # Changed from 443:443 to avoid conflict with npm_app
     volumes:
       - /opt/kasm/1.15.0/conf/nginx:/etc/nginx/conf.d:ro
       - /opt/kasm/1.15.0/certs/kasm_nginx.crt:/etc/ssl/certs/kasm_nginx.crt:rw
@@ -198,7 +223,7 @@ services:
       - kasm_default_network
     command: redis-server --appendonly yes
     volumes:
-      - 252d9232728ad61b918beab6c41000427422a:/data
+      - kasm_db_1.15.0:/data
 
   kasm_share:
     image: kasmweb/share:1.15.0
@@ -217,29 +242,7 @@ services:
       - kasm_db
       - kasm_redis
 
-  # Other containers in docker stack
-  node:
-    image: node:latest
-    container_name: node
-    restart: unless-stopped
-    networks:
-      - rtpi_bridge
-    ports:
-      - "3500:3500"
-
-  portainer:
-    image: portainer/portainer-ce:2.21.0
-    container_name: portainer
-    restart: unless-stopped
-    networks:
-      - rtpi_bridge
-    ports:
-      - "8000:8000"
-      - "9443:9443"
-    volumes:
-      - portainer_data:/data
-      - /var/run/docker.sock:/var/run/docker.sock
-
+  # Empire C2 framework
   ps-empire:
     image: bcsecurity/empire:latest
     container_name: ps-empire
@@ -250,16 +253,27 @@ services:
       - "1337:1337"
       - "5000:5000"
     volumes:
-      - 52e1a97102b402fbb572830d36cc42648c2f9:/empire
+      - empire_data:/empire
     command: ./ps-empire server
 
-  # Sysreptor stack
+  # Node.js service
+  node:
+    image: node:latest
+    container_name: node
+    restart: unless-stopped
+    networks:
+      - rtpi_bridge
+    ports:
+      - "3500:3500"
+
+  # SysReptor stack
   sysreptor-app:
-    image: syslifters/sysreptor:2024.96
+    image: syslifters/sysreptor:2025.37
     container_name: sysreptor-app
     restart: unless-stopped
     networks:
       - sysreptor_default
+      - rtpi_bridge
     ports:
       - "9000:8000"
     healthcheck:
@@ -273,6 +287,8 @@ services:
       - sysreptor-db
       - sysreptor-redis
     command: /bin/bash /app/api/start.sh
+    env_file:
+      - ./configs/rtpi-sysreptor/app.env
 
   sysreptor-caddy:
     image: caddy:latest
@@ -281,10 +297,12 @@ services:
     networks:
       - sysreptor_default
       - rtpi_bridge
+    ports:
+      - "7777:7777"
     volumes:
       - sysreptor-caddy-data:/data
-      - /opt/sysreptor/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:rw
-    command: caddy reverse-proxy --from :7777 --to :9000
+      - ./configs/rtpi-sysreptor/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+    command: caddy reverse-proxy --from :7777 --to sysreptor-app:8000
 
   sysreptor-db:
     image: postgres:14
@@ -299,7 +317,6 @@ services:
       retries: 3
     volumes:
       - sysreptor-db-data:/var/lib/postgresql/data
-      - 3f135bde4b14a9d97bdf75da01a9f813db2bf:/var/lib/postgresql/data
     environment:
       - POSTGRES_PASSWORD=sysreptorpassword
       - POSTGRES_USER=sysreptor

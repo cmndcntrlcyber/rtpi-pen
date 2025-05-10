@@ -1,95 +1,123 @@
-# RTPI-Pen
+# RTPI-PEN Container Orchestration
 
-A Pentest flavor for the Red Team Portable Infrastructure 
-
-RTPI-Pen is a comprehensive penetration testing environment that combines multiple security and reporting tools in a containerized setup.
+A comprehensive Docker-based platform for Red Team Penetration Infrastructure, combining multiple security-focused services in a container stack.
 
 ## Overview
 
-This project provides a complete penetration testing infrastructure with the following main components:
+RTPI-PEN provides a pre-configured environment with multiple security tools including:
 
-- **Kasm Workspaces**: Browser-based containerized desktop environments
-- **Sysreptor**: Penetration testing report generator
-- **Empire**: PowerShell post-exploitation framework
-- **Portainer**: Docker container management UI
-- **Support services**: PostgreSQL, Redis, Nginx, Caddy
+- Kasm Workspaces (remote browser isolation)
+- SysReptor (penetration testing documentation)
+- Empire (C2 framework)
+- Nginx Proxy Manager
+- Local Docker Registry
+- Portainer CE
 
-## Prerequisites
+## Architecture
 
-- Docker Engine 20.10+
-- Docker Compose 2.0+
-- At least 16GB RAM
-- At least 50GB disk space
+The stack is designed with the following components:
+
+- **Portainer-based Orchestrator**: Central management container that provides a web UI and Docker management
+- **Multiple Network Segments**: Isolated network segments for different tool stacks
+- **Proxy Integration**: All web UIs configured for access through Kasm proxy
 
 ## Getting Started
 
-### Installation
+### Prerequisites
 
-1. Clone this repository:
+- Docker 20.10+ and Docker Compose v2
+- 8GB+ RAM recommended
+- 40GB+ free disk space
+
+### Quick Start
+
+1. Clone the repository:
    ```bash
-   git clone https://your-repo-url/rtpi-pen.git
+   git clone https://github.com/yourusername/rtpi-pen.git
    cd rtpi-pen
    ```
 
-2. Configure environment variables:
+2. Build the container:
    ```bash
-   cp .env.example .env
-   # Edit .env with your preferred settings
+   docker compose build
    ```
 
-3. Start the environment:
+3. Start the services:
    ```bash
-   ./scripts/startup.sh
+   docker compose up -d
    ```
 
-### Access Services
+## Available Services
 
-Once the environment is running, you can access the following services:
+| Service | URL | Default Port | Description |
+|---------|-----|--------------|-------------|
+| Portainer | https://localhost:9443 | 9443 | Container management UI |
+| Kasm Workspaces | https://localhost:8443 | 8443 | Remote browser isolation |
+| SysReptor | http://localhost:9000 | 9000 | Penetration testing documentation |
+| Empire | http://localhost:1337 | 1337, 5000 | C2 framework |
+| Nginx Proxy Manager | http://localhost:81 | 80, 81, 443 | Reverse proxy |
+| Local Registry | http://localhost:5000 | 5000 | Docker image registry |
 
-- **Kasm Workspaces**: https://localhost:443
-- **Sysreptor**: http://localhost:9000
-- **Portainer**: https://localhost:9443
-- **Empire**: http://localhost:1337
+## Service Configuration
 
-## Network Structure
+### Kasm Workspaces
 
-The environment consists of three main networks:
+Kasm provides browser isolation and virtual desktop services. The configuration is located in `/opt/kasm/1.15.0/` and is automatically set up by the container.
 
-1. **Bridge Network (172.17.0.0/16)**: Default Docker bridge network
-2. **Kasm Network (172.18.0.0/16)**: Network for Kasm workspace containers
-3. **Sysreptor Network (172.20.0.0/16)**: Network for Sysreptor services
+### SysReptor
 
-## Data Persistence
+SysReptor is a penetration testing documentation tool. Environment variables can be modified in `configs/rtpi-sysreptor/app.env`.
 
-All data is stored in Docker volumes for persistence. Backups can be created using:
+### Empire
+
+Empire C2 framework is accessible on ports 1337 and 5000. Data is persisted in the `empire_data` volume.
+
+## Building and Publishing
+
+To build and publish the image to Docker Hub:
 
 ```bash
-./scripts/backup.sh
+# Build the image
+docker build -t yourusername/rtpi-pen:latest .
+
+# Push to Docker Hub
+docker push yourusername/rtpi-pen:latest
 ```
 
-## Management Scripts
+## Custom Deployments
 
-The `scripts/` directory contains several helper scripts:
+You can modify `docker-compose.yml` to adjust service configurations, port mappings, and volume persistence according to your requirements.
 
-- `startup.sh`: Start all services in the correct order
-- `shutdown.sh`: Gracefully stop all services
-- `backup.sh`: Create backups of all data
-- `restore.sh`: Restore data from backups
-- `health-check.sh`: Check the health of all services
-- `cleanup.sh`: Clean up unused images and volumes
+## Volumes and Data Persistence
 
-## Security Considerations
+All service data is stored in named Docker volumes:
 
-This environment contains security testing tools. Please ensure:
+- `portainer_data`: Portainer configuration and data
+- `kasm_db_1.15.0`: Kasm database and settings
+- `sysreptor-app-data`: SysReptor application data
+- `sysreptor-db-data`: SysReptor database
+- `empire_data`: Empire C2 framework data
+- `registry_data`: Local Docker registry data
 
-1. This environment is deployed in a secure network
-2. Default passwords are changed in the `.env` file
-3. Proper access controls are implemented
+## Troubleshooting
+
+If you encounter issues:
+
+1. Check container logs:
+   ```bash
+   docker compose logs service-name
+   ```
+
+2. Verify all services are running:
+   ```bash
+   docker compose ps
+   ```
+
+3. Restart a specific service:
+   ```bash
+   docker compose restart service-name
+   ```
 
 ## License
 
-[Your License Information]
-
-## Contributing
-
-[Your Contribution Guidelines]
+See the LICENSE file for details.
