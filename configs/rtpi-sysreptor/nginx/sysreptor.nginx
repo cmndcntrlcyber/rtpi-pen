@@ -8,10 +8,10 @@ server {
 
 server {
 	listen 10443 ssl http2 default_server;
-	server_name c3s-reports.attck-node.net;
+	server_name $cust_id-reports.attck-node.net;
 
-	ssl_certificate /etc/letsencrypt/live/c3s-reports.attck-node.net/fullchain.pem;
-	ssl_certificate_key /etc/letsencrypt/live/c3s-reports.attck-node.net/privkey.pem;
+	ssl_certificate /etc/letsencrypt/live/$cust_id-reports.attck-node.net/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/$cust_id-reports.attck-node.net/privkey.pem;
 	ssl_session_timeout 1d;
 	ssl_session_cache shared:MozSSL:10m;  # about 40000 sessions
 	ssl_session_tickets off;
