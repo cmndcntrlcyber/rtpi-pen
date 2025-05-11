@@ -105,142 +105,180 @@ services:
       - registry_data:/var/lib/registry
 
   # Kasm Workspaces stack
-  kasm_agent:
-    image: kasmweb/agent:1.15.0
-    container_name: kasm_agent
-    restart: unless-stopped
-    networks:
-      - kasm_default_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    volumes:
-      - kasm_db_1.15.0:/data
-      - /var/run/docker.sock:/var/run/docker.sock:rw
-      - /opt/kasm/1.15.0/conf/nginx:/etc/nginx/conf.d:rw
-      - /opt/kasm/1.15.0:/opt/kasm/current:rw
-
-  kasm_api:
-    image: kasmweb/api:1.15.0
-    container_name: kasm_api
-    restart: unless-stopped
-    networks:
-      - kasm_default_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    volumes:
-      - /opt/kasm/1.15.0:/opt/kasm/current:rw
-      - /opt/kasm/1.15.0/tmp/api:/tmp:rw
-    depends_on:
-      - kasm_db
-
+  # Kasm Workspaces stack - Using configuration from rtpi-kasm
   kasm_db:
-    image: postgres:12-alpine
     container_name: kasm_db
-    restart: unless-stopped
-    networks:
-      - kasm_default_network
+    image: postgres:${POSTGRES_VERSION_KASM:-12-alpine}
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    volumes:
-      - kasm_db_1.15.0:/var/lib/postgresql/data
-      - /opt/kasm/1.15.0/log/postgres:/var/log/postgres:rw
-      - /opt/kasm/1.15.0/conf/database/data.sql:/docker-entrypoint-initdb.d/data.sql:rw
-      - /opt/kasm/1.15.0/certs/db_server.crt:/etc/ssl/certs/db_server.crt:rw
-      - /opt/kasm/1.15.0/certs/db_server.key:/etc/ssl/certs/db_server.key:rw
-      - /opt/kasm/1.15.0/conf/database:/tmp:rw
-      - /opt/kasm/1.15.0/conf/database/pg_hba.conf:/var/lib/postgresql/conf/pg_hba.conf:rw
-      - /opt/kasm/1.15.0/conf/database/postgresql.conf:/var/lib/postgresql/conf/postgresql.conf:rw
-    command: postgres -c ssl=on -c ssl_cert_file=/etc/ssl/certs/db_server.crt -c ssl_key_file=/etc/ssl/certs/db_server.key -c config_file=/var/lib/postgresql/conf/postgresql.conf -c hba_file=/var/lib/postgresql/conf/pg_hba.conf
-
-  kasm_guac:
-    image: kasmweb/kasm-guac:1.15.0
-    container_name: kasm_guac
-    restart: unless-stopped
-    networks:
-      - kasm_default_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    volumes:
-      - /opt/kasm/1.15.0:/opt/kasm/current:rw
-      - /opt/kasm/1.15.0/tmp/guac:/tmp:rw
-
-  kasm_manager:
-    image: kasmweb/manager:1.15.0
-    container_name: kasm_manager
-    restart: unless-stopped
-    networks:
-      - kasm_default_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    volumes:
-      - /opt/kasm/1.15.0:/opt/kasm/current:rw
-    depends_on:
-      - kasm_db
-
-  kasm_proxy:
-    image: kasmweb/nginx:1.25.3
-    container_name: kasm_proxy
-    restart: unless-stopped
+      test: "pg_isready --username=${POSTGRES_USER_KASM:-kasmapp} && cat /proc/1/cmdline | grep -q '^postgres'"
+      timeout: 5s
+      retries: 20
     networks:
       - kasm_default_network
       - rtpi_bridge
-    ports:
-      - "8443:443"  # Changed from 443:443 to avoid conflict with npm_app
+    environment:
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD_KASM:-SjenXuTppFFSWIIKjaAJ}"
+      POSTGRES_USER: ${POSTGRES_USER_KASM:-kasmapp}
+      POSTGRES_DB: ${POSTGRES_DB_KASM:-kasm}
     volumes:
-      - /opt/kasm/1.15.0/conf/nginx:/etc/nginx/conf.d:ro
-      - /opt/kasm/1.15.0/certs/kasm_nginx.crt:/etc/ssl/certs/kasm_nginx.crt:rw
-      - /opt/kasm/1.15.0/certs/kasm_nginx.key:/etc/ssl/private/kasm_nginx.key:rw
-      - /opt/kasm/1.15.0/www:/srv/www:ro
-      - /opt/kasm/1.15.0/log/logrotate:/var/log/external/logrotate:rw
-      - /opt/kasm/1.15.0/log/nginx:/var/log/external/nginx:rw
-    depends_on:
-      - kasm_api
-      - kasm_manager
-      - kasm_share
-      - kasm_guac
-      - kasm_agent
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/data.sql:/docker-entrypoint-initdb.d/data.sql
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/pg_hba.conf:/var/lib/postgresql/conf/pg_hba.conf
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/postgresql.conf:/var/lib/postgresql/conf/postgresql.conf
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/:/tmp/
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/db_server.crt:/etc/ssl/certs/db_server.crt
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/db_server.key:/etc/ssl/certs/db_server.key
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/log/postgres/:/var/log/postgres/
+      - kasm_db_1.15.0:/var/lib/postgresql/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+    command: postgres -c ssl=on -c ssl_cert_file=/etc/ssl/certs/db_server.crt -c ssl_key_file=/etc/ssl/certs/db_server.key -c config_file=/var/lib/postgresql/conf/postgresql.conf -c hba_file=/var/lib/postgresql/conf/pg_hba.conf
+    restart: "always"
 
   kasm_redis:
-    image: redis:5-alpine
     container_name: kasm_redis
-    restart: unless-stopped
+    command: ["sh", "-c", "redis-server --requirepass $${REDIS_PASSWORD}"]
+    user: "${KASM_UID:-1000}:${KASM_GID:-1000}"
+    image: redis:${REDIS_KASM_VERSION:-5-alpine}
     networks:
       - kasm_default_network
-    command: redis-server --appendonly yes
+      - rtpi_bridge
+    environment:
+      REDIS_PASSWORD: "CwoZWGpBk5PZ3zD79fIK"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+    restart: "always"
+
+  kasm_api:
+    container_name: kasm_api
+    user: "${KASM_UID:-1000}:${KASM_GID:-1000}"
+    image: "kasmweb/api:${KASM_VERSION:-1.15.0}"
+    read_only: true
+    networks:
+      - kasm_default_network
+      - rtpi_bridge
     volumes:
-      - kasm_db_1.15.0:/data
+      - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/tmp/api:/tmp
+    depends_on:
+      - kasm_db
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+
+  kasm_manager:
+    container_name: kasm_manager
+    user: "${KASM_UID:-1000}:${KASM_GID:-1000}"
+    image: "kasmweb/manager:${KASM_VERSION:-1.15.0}"
+    read_only: true
+    networks:
+      - kasm_default_network
+      - rtpi_bridge
+    volumes:
+      - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
+    depends_on:
+      - kasm_db
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+
+  kasm_agent:
+    container_name: kasm_agent
+    user: root
+    image: "kasmweb/agent:${KASM_VERSION:-1.15.0}"
+    read_only: true
+    networks:
+      - kasm_default_network
+      - rtpi_bridge
+    volumes:
+      - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/nginx:/etc/nginx/conf.d
+    depends_on:
+      - kasm_manager
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
 
   kasm_share:
-    image: kasmweb/share:1.15.0
     container_name: kasm_share
-    restart: unless-stopped
+    user: root
+    image: "kasmweb/share:${KASM_VERSION:-1.15.0}"
+    read_only: true
     networks:
       - kasm_default_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      - rtpi_bridge
     volumes:
-      - /opt/kasm/1.15.0:/opt/kasm/current:rw
+      - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
+    restart: always
     depends_on:
       - kasm_db
       - kasm_redis
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+
+  kasm_guac:
+    container_name: kasm_guac
+    user: "${KASM_UID:-1000}:${KASM_GID:-1000}"
+    image: "kasmweb/kasm-guac:${KASM_VERSION:-1.15.0}"
+    read_only: true
+    networks:
+      - kasm_default_network
+      - rtpi_bridge
+    volumes:
+      - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/tmp/guac:/tmp
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
+
+  kasm_proxy:
+    container_name: kasm_proxy
+    image: "kasmweb/nginx:${NGINX_VERSION:-1.25.3}"
+    ports:
+      - "8443:443" # Changed from 443:443 to avoid conflict with npm_app
+    networks:
+      - kasm_default_network
+      - rtpi_bridge
+    volumes:
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/nginx:/etc/nginx/conf.d:ro
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/kasm_nginx.key:/etc/ssl/private/kasm_nginx.key
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/kasm_nginx.crt:/etc/ssl/certs/kasm_nginx.crt
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/www:/srv/www:ro
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/log/nginx:/var/log/external/nginx/
+      - /opt/kasm/${KASM_VERSION:-1.15.0}/log/logrotate:/var/log/external/logrotate/
+    depends_on:
+      - kasm_manager
+      - kasm_api
+      - kasm_agent
+      - kasm_share
+      - kasm_guac
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "20"
 
   # Empire C2 framework
   ps-empire:
