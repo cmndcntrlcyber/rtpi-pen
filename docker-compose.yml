@@ -52,7 +52,7 @@ services:
       - ./setup:/opt/rtpi-pen/setup:ro
     command: ["portainer"]
     ports:
-      - "9443:9443" # Portainer HTTPS UI
+      - "9444:9443" # Portainer HTTPS UI - changed from 9443 to 9444 to avoid conflict
 
   # Nginx Proxy Manager
   npm_app:

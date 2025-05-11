@@ -136,7 +136,7 @@ services:
     container_name: kasm_proxy
     image: "kasmweb/nginx:1.25.3"
     ports:
-      - "443:443"
+      - "8443:443"
     networks:
       - kasm_default_network
     volumes:
