@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTPI-PEN Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            color: #fff;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 50px;
+            padding: 40px 0;
+            background: rgba(0,0,0,0.3);
+            border-radius: 15px;
+        }
+
+        .header h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            color: #ccc;
+            margin-bottom: 20px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #2ecc71;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .services {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .service-card {
+            background: rgba(42, 42, 42, 0.8);
+            padding: 30px;
+            border-radius: 15px;
+            text-align: center;
+            border: 2px solid transparent;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .service-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            transition: left 0.5s;
+        }
+
+        .service-card:hover::before {
+            left: 100%;
+        }
+
+        .service-card:hover {
+            border-color: #4ecdc4;
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(78, 205, 196, 0.3);
+        }
+
+        .service-icon {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            display: block;
+        }
+
+        .service-card h3 {
+            color: #4ecdc4;
+            margin-bottom: 15px;
+            font-size: 1.5rem;
+        }
+
+        .service-card p {
+            color: #bbb;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+
+        .service-link {
+            display: inline-block;
+            color: #fff;
+            text-decoration: none;
+            background: linear-gradient(45deg, #4ecdc4, #44a08d);
+            padding: 12px 25px;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        .service-link:hover {
+            transform: scale(1.05);
+            box-shadow: 0 5px 15px rgba(78, 205, 196, 0.4);
+        }
+
+        .info-section {
+            background: rgba(42, 42, 42, 0.6);
+            padding: 30px;
+            border-radius: 15px;
+            margin-top: 40px;
+        }
+
+        .info-section h3 {
+            color: #ff6b6b;
+            margin-bottom: 20px;
+            font-size: 1.3rem;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .info-item {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .info-item strong {
+            color: #4ecdc4;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 50px;
+            padding: 20px;
+            color: #666;
+            border-top: 1px solid #333;
+        }
+
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .services {
+                grid-template-columns: 1fr;
+            }
+            
+            .container {
+                padding: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔴 RTPI-PEN Dashboard</h1>
+            <p><span class="status-indicator"></span>Red Team Penetration Infrastructure - Multi-Container Platform</p>
+            <p>Secure. Scalable. Professional.</p>
+        </div>
+
+        <div class="services">
+            <div class="service-card">
+                <div class="service-icon">🐳</div>
+                <h3>Portainer</h3>
+                <p>Container Management Interface<br>Orchestrate and monitor all services</p>
+                <a href="/portainer/" target="_blank" class="service-link">Access Portainer</a>
+            </div>
+
+            <div class="service-card">
+                <div class="service-icon">🖥️</div>
+                <h3>Kasm Workspaces</h3>
+                <p>Browser-based Virtual Desktops<br>Isolated environments for security testing</p>
+                <a href="/kasm/" target="_blank" class="service-link">Access Kasm</a>
+            </div>
+
+            <div class="service-card">
+                <div class="service-icon">📊</div>
+                <h3>SysReptor</h3>
+                <p>Penetration Testing Reporting<br>Professional documentation platform</p>
+                <a href="/sysreptor/" target="_blank" class="service-link">Access SysReptor</a>
+            </div>
+
+            <div class="service-card">
+                <div class="service-icon">👑</div>
+                <h3>Empire C2</h3>
+                <p>Command & Control Framework<br>Post-exploitation and persistence</p>
+                <a href="/empire/" target="_blank" class="service-link">Access Empire</a>
+            </div>
+
+            <div class="service-card">
+                <div class="service-icon">🔧</div>
+                <h3>Security Tools</h3>
+                <p>Metasploit, Nmap, Hashcat & More<br>Complete penetration testing toolkit</p>
+                <a href="#" onclick="showToolsInfo()" class="service-link">View Tools</a>
+            </div>
+
+            <div class="service-card">
+                <div class="service-icon">🗄️</div>
+                <h3>Infrastructure</h3>
+                <p>PostgreSQL, Redis, Registry<br>Backend services and data storage</p>
+                <a href="/api/status" target="_blank" class="service-link">Service Status</a>
+            </div>
+        </div>
+
+        <div class="info-section">
+            <h3>🏗️ Architecture Overview</h3>
+            <div class="info-grid">
+                <div class="info-item">
+                    <strong>Proxy Layer:</strong> Nginx reverse proxy with SSL termination
+                </div>
+                <div class="info-item">
+                    <strong>Database:</strong> PostgreSQL with multiple databases
+                </div>
+                <div class="info-item">
+                    <strong>Cache:</strong> Redis cluster for session management
+                </div>
+                <div class="info-item">
+                    <strong>Tools:</strong> Containerized security testing tools
+                </div>
+                <div class="info-item">
+                    <strong>Orchestration:</strong> Docker Compose with service isolation
+                </div>
+                <div class="info-item">
+                    <strong>Security:</strong> Network segmentation and access controls
+                </div>
+            </div>
+        </div>
+
+        <div class="info-section">
+            <h3>⚡ Quick Actions</h3>
+            <div class="info-grid">
+                <div class="info-item">
+                    <strong>Service Logs:</strong> <code>docker compose logs -f [service]</code>
+                </div>
+                <div class="info-item">
+                    <strong>Scale Service:</strong> <code>docker compose up -d --scale [service]=N</code>
+                </div>
+                <div class="info-item">
+                    <strong>Shell Access:</strong> <code>docker compose exec [service] /bin/bash</code>
+                </div>
+                <div class="info-item">
+                    <strong>Restart All:</strong> <code>docker compose restart</code>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>RTPI-PEN v2.0 - Built for security professionals, by security professionals</p>
+            <p>⚠️ Use only in authorized testing environments</p>
+        </div>
+    </div>
+
+    <script>
+        function showToolsInfo() {
+            alert('Security Tools Container includes:\n\n• Metasploit Framework\n• Nmap & Network Tools\n• Hashcat & Password Tools\n• PowerShell & Impacket\n• Custom Red Team Scripts\n\nAccess via: docker compose exec rtpi-tools /bin/bash');
+        }
+
+        // Simple service status check
+        fetch('/api/status')
+            .then(response => response.json())
+            .then(data => {
+                console.log('Service Status:', data);
+            })
+            .catch(error => {
+                console.log('Status check failed:', error);
+            });
+    </script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+version: '3.8'
+
+networks:
+  rtpi_network:
+    driver: bridge
+
+volumes:
+  rtpi_postgresql_data:
+    driver: local
+  rtpi_redis_data:
+    driver: local
+  rtpi_portainer_data:
+    driver: local
+  rtpi_app_data:
+    driver: local
+
+services:
+  rtpi-pen-all-in-one:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cmndcntrl/rtpi-pen:all-in-one
+    container_name: rtpi-pen-all-in-one
+    restart: unless-stopped
+    privileged: true  # Required for Docker-in-Docker and system tools
+    networks:
+      - rtpi_network
+    ports:
+      - "80:80"     # HTTP (redirects to HTTPS)
+      - "443:443"   # HTTPS main interface
+      - "1337:1337" # Empire C2 direct access
+      - "5000:5000" # Empire C2 additional port
+      - "8000:8000" # SysReptor direct access
+      - "8443:8443" # Kasm direct access
+      - "9000:9000" # Portainer direct access
+    volumes:
+      - rtpi_postgresql_data:/var/lib/postgresql
+      - rtpi_redis_data:/var/lib/redis
+      - rtpi_portainer_data:/opt/portainer/data
+      - rtpi_app_data:/opt/rtpi-pen/data
+      - /var/run/docker.sock:/var/run/docker.sock:rw  # For Docker management
+    environment:
+      - KASM_UID=1000
+      - KASM_GID=1000
+      - POSTGRES_PASSWORD=rtpi_secure_password
+      - REDIS_PASSWORD=rtpi_redis_password
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s

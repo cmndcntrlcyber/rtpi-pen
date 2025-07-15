@@ -1,0 +1,394 @@
+# RTPI-PEN: Red Team Penetration Infrastructure - All-in-One Container
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during installation
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Environment variables
+ENV KASM_UID=1000
+ENV KASM_GID=1000
+ENV KASM_VERSION=1.15.0
+ENV PORTAINER_VERSION=2.21.0
+ENV POSTGRES_VERSION=14
+ENV REDIS_VERSION=7.2
+ENV NODE_VERSION=20
+
+# Create application directories
+RUN mkdir -p /opt/rtpi-pen /opt/kasm /opt/sysreptor /opt/empire /opt/tools \
+    && mkdir -p /var/log/rtpi /var/lib/rtpi /etc/rtpi
+
+# Add external repositories
+RUN apt-get update && apt-get install -y \
+    curl wget gnupg lsb-release ca-certificates software-properties-common \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add Microsoft PowerShell repository
+RUN curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
+    && echo "deb [arch=amd64,arm64,armhf signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/microsoft-ubuntu-jammy-prod jammy main" > /etc/apt/sources.list.d/microsoft.list
+
+# Add Caddy repository
+RUN curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" > /etc/apt/sources.list.d/caddy-stable.list
+
+# Install base system packages
+RUN apt-get update && apt-get install -y \
+    # Basic system tools
+    build-essential git vim nano htop supervisor sudo \
+    # Security and networking tools (available in Ubuntu repos)
+    nmap hashcat hydra proxychains4 \
+    mingw-w64 wine wireshark python3-impacket \
+    nbtscan smbclient net-tools \
+    # Development tools
+    python3 python3-pip python3-venv python-is-python3 jython \
+    default-jdk golang-go \
+    # Database and cache
+    postgresql-14 postgresql-client-14 redis-server \
+    # Web server and proxy
+    nginx \
+    # SSL/TLS tools
+    certbot \
+    # Container tools
+    containerd docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install packages from external repositories
+RUN apt-get update && apt-get install -y \
+    powershell \
+    caddy \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js (latest LTS) - Clean installation
+RUN apt-get purge -y nodejs npm libnode-dev node-* || true \
+    && rm -rf /usr/include/node /usr/lib/node_modules /etc/apt/sources.list.d/nodesource.list || true \
+    && curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y nodejs
+
+# Install Python packages for red team operations
+RUN pip3 install --no-cache-dir \
+    pwntools pycryptodome cryptography requests pyOpenSSL \
+    impacket bloodhound
+
+# Note: CrackMapExec/NetExec removed due to PyPI availability issues
+# Similar functionality available via impacket tools already installed
+
+# Install Metasploit Framework
+RUN curl https://raw.githubusercontent.com/rapid7/metasploit-omnibus/master/config/templates/metasploit-framework-wrappers/msfupdate.erb > msfinstall \
+    && chmod 755 msfinstall \
+    && ./msfinstall \
+    && rm msfinstall
+
+
+# Install Portainer
+RUN mkdir -p /opt/portainer && \
+    wget -q "https://github.com/portainer/portainer/releases/download/${PORTAINER_VERSION}/portainer-${PORTAINER_VERSION}-linux-amd64.tar.gz" \
+    -O /tmp/portainer.tar.gz && \
+    tar -xzf /tmp/portainer.tar.gz -C /opt/portainer --strip-components=1 && \
+    rm /tmp/portainer.tar.gz
+
+# Setup PostgreSQL
+RUN service postgresql start && \
+    sudo -u postgres createuser -s rtpi && \
+    sudo -u postgres createdb -O rtpi rtpi_main && \
+    sudo -u postgres createdb -O rtpi kasm && \
+    sudo -u postgres createdb -O rtpi sysreptor && \
+    sudo -u postgres psql -c "ALTER USER rtpi PASSWORD 'rtpi_secure_password';" && \
+    sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres_secure_password';"
+
+# Setup Redis with multiple instances
+RUN mkdir -p /etc/redis /var/lib/redis /var/log/redis && \
+    cp /etc/redis/redis.conf /etc/redis/redis-main.conf && \
+    cp /etc/redis/redis.conf /etc/redis/redis-kasm.conf && \
+    cp /etc/redis/redis.conf /etc/redis/redis-sysreptor.conf && \
+    # Configure Redis instances
+    sed -i 's/^port 6379/port 6379/' /etc/redis/redis-main.conf && \
+    sed -i 's/^port 6379/port 6380/' /etc/redis/redis-kasm.conf && \
+    sed -i 's/^port 6379/port 6381/' /etc/redis/redis-sysreptor.conf && \
+    sed -i 's/^# requirepass foobared/requirepass rtpi_redis_password/' /etc/redis/redis-*.conf
+
+# Install Kasm Workspaces dependencies
+RUN mkdir -p /opt/kasm/${KASM_VERSION}/{conf,certs,www,log,tmp} \
+    && mkdir -p /opt/kasm/${KASM_VERSION}/conf/{nginx,database} \
+    && mkdir -p /opt/kasm/${KASM_VERSION}/log/{nginx,postgres,logrotate} \
+    && mkdir -p /opt/kasm/${KASM_VERSION}/tmp/{api,guac}
+
+# Install SysReptor dependencies
+RUN pip3 install --no-cache-dir \
+    django djangorestframework celery reportlab weasyprint \
+    psycopg2-binary redis python-decouple
+
+# Setup PowerShell Empire - Pre-pull official Docker image
+RUN docker pull bcsecurity/empire:latest || echo "Empire image will be pulled at runtime"
+
+# Install additional red team tools
+RUN cd /opt/tools && \
+    git clone https://github.com/PowerShellMafia/PowerSploit.git && \
+    git clone https://github.com/S3cur3Th1sSh1t/WinPwn.git && \
+    git clone https://github.com/BloodHoundAD/BloodHound.git && \
+    git clone https://github.com/offensive-security/exploitdb.git && \
+    ln -sf /opt/tools/exploitdb/searchsploit /usr/local/bin/searchsploit
+
+# Copy application files
+COPY configs/ /opt/rtpi-pen/configs/
+COPY setup/ /opt/rtpi-pen/setup/
+
+# Create Nginx configuration for reverse proxy
+RUN cat > /etc/nginx/sites-available/rtpi-pen << 'EOF'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+
+    ssl_certificate /opt/rtpi-pen/certs/rtpi.crt;
+    ssl_certificate_key /opt/rtpi-pen/certs/rtpi.key;
+
+    # Portainer
+    location /portainer/ {
+        proxy_pass http://localhost:9000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Kasm Workspaces
+    location /kasm/ {
+        proxy_pass https://localhost:8443/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # SysReptor
+    location /sysreptor/ {
+        proxy_pass http://localhost:8000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Empire C2
+    location /empire/ {
+        proxy_pass http://localhost:1337/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Main dashboard
+    location / {
+        root /opt/rtpi-pen/www;
+        index index.html;
+        try_files $uri $uri/ =404;
+    }
+}
+EOF
+
+# Enable the site
+RUN rm -f /etc/nginx/sites-enabled/default && \
+    ln -s /etc/nginx/sites-available/rtpi-pen /etc/nginx/sites-enabled/
+
+# Create main dashboard
+RUN mkdir -p /opt/rtpi-pen/www && \
+    cat > /opt/rtpi-pen/www/index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RTPI-PEN Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #1a1a1a; color: #fff; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .services { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .service-card { background: #2a2a2a; padding: 20px; border-radius: 8px; text-align: center; }
+        .service-card h3 { color: #ff6b6b; margin-top: 0; }
+        .service-card a { color: #4ecdc4; text-decoration: none; }
+        .service-card a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔴 RTPI-PEN Dashboard</h1>
+            <p>Red Team Penetration Infrastructure - All-in-One Platform</p>
+        </div>
+        <div class="services">
+            <div class="service-card">
+                <h3>🐳 Portainer</h3>
+                <p>Container Management Interface</p>
+                <a href="/portainer/" target="_blank">Access Portainer</a>
+            </div>
+            <div class="service-card">
+                <h3>🖥️ Kasm Workspaces</h3>
+                <p>Browser-based Virtual Desktops</p>
+                <a href="/kasm/" target="_blank">Access Kasm</a>
+            </div>
+            <div class="service-card">
+                <h3>📊 SysReptor</h3>
+                <p>Penetration Testing Reporting</p>
+                <a href="/sysreptor/" target="_blank">Access SysReptor</a>
+            </div>
+            <div class="service-card">
+                <h3>👑 Empire C2</h3>
+                <p>Command & Control Framework</p>
+                <a href="/empire/" target="_blank">Access Empire</a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+EOF
+
+# Create supervisord configuration
+RUN cat > /etc/supervisor/conf.d/rtpi-pen.conf << 'EOF'
+[supervisord]
+nodaemon=true
+user=root
+logfile=/var/log/rtpi/supervisord.log
+pidfile=/var/run/supervisord.pid
+
+[program:postgresql]
+command=/usr/lib/postgresql/14/bin/postgres -D /var/lib/postgresql/14/main -c config_file=/etc/postgresql/14/main/postgresql.conf
+user=postgres
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/rtpi/postgresql.err.log
+stdout_logfile=/var/log/rtpi/postgresql.out.log
+
+[program:redis-main]
+command=redis-server /etc/redis/redis-main.conf
+user=redis
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/rtpi/redis-main.err.log
+stdout_logfile=/var/log/rtpi/redis-main.out.log
+
+[program:redis-kasm]
+command=redis-server /etc/redis/redis-kasm.conf
+user=redis
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/rtpi/redis-kasm.err.log
+stdout_logfile=/var/log/rtpi/redis-kasm.out.log
+
+[program:redis-sysreptor]
+command=redis-server /etc/redis/redis-sysreptor.conf
+user=redis
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/rtpi/redis-sysreptor.err.log
+stdout_logfile=/var/log/rtpi/redis-sysreptor.out.log
+
+[program:nginx]
+command=/usr/sbin/nginx -g "daemon off;"
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/rtpi/nginx.err.log
+stdout_logfile=/var/log/rtpi/nginx.out.log
+
+[program:portainer]
+command=/opt/portainer/portainer --data /opt/portainer/data --bind :9000
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/rtpi/portainer.err.log
+stdout_logfile=/var/log/rtpi/portainer.out.log
+
+[program:empire]
+command=/bin/bash -c "if docker info >/dev/null 2>&1; then docker run --rm --name empire-server -p 1337:1337 -v empire_data:/empire bcsecurity/empire:latest; else echo 'Empire C2 requires Docker - service unavailable' && sleep 3600; fi"
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/rtpi/empire.err.log
+stdout_logfile=/var/log/rtpi/empire.out.log
+startretries=3
+startsecs=10
+EOF
+
+# Generate self-signed certificates
+RUN mkdir -p /opt/rtpi-pen/certs && \
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /opt/rtpi-pen/certs/rtpi.key \
+    -out /opt/rtpi-pen/certs/rtpi.crt \
+    -subj "/C=US/ST=State/L=City/O=Organization/CN=rtpi-pen"
+
+# Create startup script
+RUN cat > /usr/local/bin/rtpi-startup.sh << 'EOF'
+#!/bin/bash
+set -e
+
+echo "🔴 Starting RTPI-PEN All-in-One Container..."
+
+# Initialize PostgreSQL if needed
+if [ ! -f /var/lib/postgresql/14/main/PG_VERSION ]; then
+    echo "Initializing PostgreSQL..."
+    service postgresql start
+    sleep 5
+    sudo -u postgres createuser -s rtpi || true
+    sudo -u postgres createdb -O rtpi rtpi_main || true
+    sudo -u postgres createdb -O rtpi kasm || true
+    sudo -u postgres createdb -O rtpi sysreptor || true
+    sudo -u postgres psql -c "ALTER USER rtpi PASSWORD 'rtpi_secure_password';" || true
+    service postgresql stop
+fi
+
+# Create required directories
+mkdir -p /var/log/rtpi /var/lib/rtpi /opt/portainer/data /var/log/redis
+
+# Set proper permissions
+chown -R postgres:postgres /var/lib/postgresql
+chown -R redis:redis /var/lib/redis /var/log/redis
+chown -R www-data:www-data /var/log/nginx
+
+# Start Docker daemon for Empire (if socket is available)
+if [ -S /var/run/docker.sock ]; then
+    echo "Docker socket detected, checking Docker availability..."
+    if docker info >/dev/null 2>&1; then
+        echo "✅ Docker is available"
+        # Create Empire data volume
+        docker volume create empire_data || true
+        # Pull Empire image if not already available
+        docker pull bcsecurity/empire:latest || echo "⚠️ Empire image will be pulled by supervisor"
+    else
+        echo "⚠️ Docker socket present but daemon not accessible"
+    fi
+else
+    echo "⚠️ Docker socket not available - Empire C2 will run in degraded mode"
+fi
+
+# Start supervisor
+echo "🚀 Starting all services..."
+exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+EOF
+
+RUN chmod +x /usr/local/bin/rtpi-startup.sh
+
+# Create users and set permissions
+RUN groupadd -g ${KASM_GID} kasm && \
+    useradd -u ${KASM_UID} -g ${KASM_GID} -m -s /bin/bash kasm && \
+    chown -R ${KASM_UID}:${KASM_GID} /opt/kasm && \
+    chmod +x /opt/rtpi-pen/setup/*.sh || true && \
+    chmod +x /opt/rtpi-pen/configs/*/*.sh || true
+
+# Expose ports
+EXPOSE 80 443 1337 5000 8000 8443 9000
+
+# Create volumes for data persistence
+VOLUME ["/var/lib/postgresql", "/var/lib/redis", "/opt/portainer/data", "/opt/rtpi-pen/data"]
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost/portainer/ || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["/usr/local/bin/rtpi-startup.sh"]
