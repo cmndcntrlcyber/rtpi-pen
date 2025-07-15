@@ -1,19 +1,44 @@
+# RTPI-PEN: Red Team Penetration Infrastructure
+# Multi-Container Docker Compose Configuration (PRIMARY)
+# This is the main deployment method - prioritized over single container approach
+
+version: '3.8'
+
 networks:
-  rtpi_bridge:
+  rtpi_frontend:
     driver: bridge
-  rtpi_host:
-    driver: host
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  rtpi_backend:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+  rtpi_database:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
   kasm_default_network:
     driver: bridge
-  rtpi_none:
-    driver: "null"
   sysreptor_default:
-    driver: bridge
-  npm_network:
     driver: bridge
 
 volumes:
-  # Named volumes for persistence
+  # Core Infrastructure Volumes
+  rtpi_database_data:
+    driver: local
+  rtpi_cache_data:
+    driver: local
+  rtpi_orchestrator_data:
+    driver: local
+  rtpi_tools_data:
+    driver: local
+  
+  # Application Service Volumes
   sysreptor-app-data:
     driver: local
   sysreptor-db-data:
@@ -22,90 +47,145 @@ volumes:
     driver: local
   kasm_db_1.15.0:
     driver: local
-  portainer_data:
-    driver: local
-  npm_data:
-    driver: local
-  npm_letsencrypt:
-    driver: local
-  npm_mysql:
-    driver: local
   empire_data:
     driver: local
   registry_data:
     driver: local
 
 services:
-  # Main orchestrator container (rtpi-pen)
-  rtpi-pen:
+  # =============================================================================
+  # CORE INFRASTRUCTURE SERVICES
+  # =============================================================================
+
+  rtpi-database:
     build:
-      context: .
+      context: ./services/rtpi-database
       dockerfile: Dockerfile
-    image: cmndcntrl/rtpi-pen:latest
-    container_name: rtpi-pen
+    image: rtpi-pen/database:latest
+    container_name: rtpi-database
     restart: unless-stopped
     networks:
-      - rtpi_bridge
+      - rtpi_database
+      - rtpi_backend
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:rw
-      - ./configs:/opt/rtpi-pen/configs:ro
-      - ./setup:/opt/rtpi-pen/setup:ro
-    command: ["portainer"]
-    ports:
-      - "9444:9443" # Portainer HTTPS UI - changed from 9443 to 9444 to avoid conflict
-
-  # Nginx Proxy Manager
-  npm_app:
-    image: 'jc21/nginx-proxy-manager:latest'
-    container_name: npm_app
-    restart: unless-stopped
-    ports:
-      - '80:80'   # Public HTTP Port
-      - '81:81'   # Admin Web Port
-      - '443:443' # Public HTTPS Port
+      - rtpi_database_data:/var/lib/postgresql/data
     environment:
-      DB_MYSQL_HOST: "npm_db"
-      DB_MYSQL_PORT: 3306
-      DB_MYSQL_USER: "npm"
-      DB_MYSQL_PASSWORD: "T0t4llyCh4ng3Th15P455word"
-      DB_MYSQL_NAME: "npm"
-    volumes:
-      - npm_data:/data
-      - npm_letsencrypt:/etc/letsencrypt
+      - POSTGRES_DB=rtpi_main
+      - POSTGRES_USER=rtpi
+      - POSTGRES_PASSWORD=rtpi_secure_password
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "rtpi", "-d", "rtpi_main"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rtpi-cache:
+    build:
+      context: ./services/rtpi-cache
+      dockerfile: Dockerfile
+    image: rtpi-pen/cache:latest
+    container_name: rtpi-cache
+    restart: unless-stopped
     networks:
-      - npm_network
-      - rtpi_bridge
+      - rtpi_backend
+    volumes:
+      - rtpi_cache_data:/var/lib/redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rtpi-orchestrator:
+    build:
+      context: ./services/rtpi-orchestrator
+      dockerfile: Dockerfile
+    image: rtpi-pen/orchestrator:latest
+    container_name: rtpi-orchestrator
+    restart: unless-stopped
+    networks:
+      - rtpi_frontend
+      - rtpi_backend
+    ports:
+      - "9444:9000"  # Portainer UI (external access)
+    volumes:
+      - rtpi_orchestrator_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rtpi-tools:
+    build:
+      context: ./services/rtpi-tools
+      dockerfile: Dockerfile
+    image: rtpi-pen/tools:latest
+    container_name: rtpi-tools
+    restart: unless-stopped
+    networks:
+      - rtpi_backend
+    volumes:
+      - rtpi_tools_data:/home/rtpi-tools
+      - ./configs:/opt/configs:ro
+    environment:
+      - TERM=xterm-256color
+    stdin_open: true
+    tty: true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rtpi-proxy:
+    build:
+      context: ./services/rtpi-proxy
+      dockerfile: Dockerfile
+    image: rtpi-pen/proxy:latest
+    container_name: rtpi-proxy
+    restart: unless-stopped
+    networks:
+      - rtpi_frontend
+      - rtpi_backend
+    ports:
+      - "80:80"   # HTTP (redirects to HTTPS)
+      - "443:443" # HTTPS (main interface)
     depends_on:
-      - npm_db
+      - rtpi-orchestrator
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  npm_db:
-    image: 'jc21/mariadb-aria:latest'
-    container_name: npm_db
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: 'T0t4llyCh4ng3Th15P455word'
-      MYSQL_DATABASE: 'npm'
-      MYSQL_USER: 'npm'
-      MYSQL_PASSWORD: 'T0t4llyCh4ng3Th15P455word'
-    volumes:
-      - npm_mysql:/var/lib/mysql
-    networks:
-      - npm_network
+  # =============================================================================
+  # KASM WORKSPACES STACK
+  # =============================================================================
 
-  # Docker Registry
-  registry:
-    image: registry:latest
-    container_name: local-registry
-    restart: unless-stopped
-    networks:
-      - rtpi_bridge
-    ports:
-      - "5000:5000"
-    volumes:
-      - registry_data:/var/lib/registry
-
-  # Kasm Workspaces stack
-  # Kasm Workspaces stack - Using configuration from rtpi-kasm
   kasm_db:
     container_name: kasm_db
     image: postgres:${POSTGRES_VERSION_KASM:-12-alpine}
@@ -115,7 +195,7 @@ services:
       retries: 20
     networks:
       - kasm_default_network
-      - rtpi_bridge
+      - rtpi_backend
     environment:
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD_KASM:-SjenXuTppFFSWIIKjaAJ}"
       POSTGRES_USER: ${POSTGRES_USER_KASM:-kasmapp}
@@ -133,7 +213,7 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "20"
+        max-file: "3"
     command: postgres -c ssl=on -c ssl_cert_file=/etc/ssl/certs/db_server.crt -c ssl_key_file=/etc/ssl/certs/db_server.key -c config_file=/var/lib/postgresql/conf/postgresql.conf -c hba_file=/var/lib/postgresql/conf/pg_hba.conf
     restart: "always"
 
@@ -144,14 +224,14 @@ services:
     image: redis:${REDIS_KASM_VERSION:-5-alpine}
     networks:
       - kasm_default_network
-      - rtpi_bridge
+      - rtpi_backend
     environment:
       REDIS_PASSWORD: "CwoZWGpBk5PZ3zD79fIK"
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "20"
+        max-file: "3"
     restart: "always"
 
   kasm_api:
@@ -161,7 +241,7 @@ services:
     read_only: true
     networks:
       - kasm_default_network
-      - rtpi_bridge
+      - rtpi_backend
     volumes:
       - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
       - /opt/kasm/${KASM_VERSION:-1.15.0}/tmp/api:/tmp
@@ -172,7 +252,7 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "20"
+        max-file: "3"
 
   kasm_manager:
     container_name: kasm_manager
@@ -181,7 +261,7 @@ services:
     read_only: true
     networks:
       - kasm_default_network
-      - rtpi_bridge
+      - rtpi_backend
     volumes:
       - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
     depends_on:
@@ -191,7 +271,7 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "20"
+        max-file: "3"
 
   kasm_agent:
     container_name: kasm_agent
@@ -200,7 +280,7 @@ services:
     read_only: true
     networks:
       - kasm_default_network
-      - rtpi_bridge
+      - rtpi_backend
     volumes:
       - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
       - /var/run/docker.sock:/var/run/docker.sock
@@ -212,7 +292,7 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "20"
+        max-file: "3"
 
   kasm_share:
     container_name: kasm_share
@@ -221,7 +301,7 @@ services:
     read_only: true
     networks:
       - kasm_default_network
-      - rtpi_bridge
+      - rtpi_backend
     volumes:
       - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
     restart: always
@@ -232,7 +312,7 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "20"
+        max-file: "3"
 
   kasm_guac:
     container_name: kasm_guac
@@ -241,7 +321,7 @@ services:
     read_only: true
     networks:
       - kasm_default_network
-      - rtpi_bridge
+      - rtpi_backend
     volumes:
       - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
       - /opt/kasm/${KASM_VERSION:-1.15.0}/tmp/guac:/tmp
@@ -250,16 +330,16 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "20"
+        max-file: "3"
 
   kasm_proxy:
     container_name: kasm_proxy
     image: "kasmweb/nginx:${NGINX_VERSION:-1.25.3}"
     ports:
-      - "8443:443" # Changed from 443:443 to avoid conflict with npm_app
+      - "8443:443" # HTTPS port for Kasm proxy (external access)
     networks:
       - kasm_default_network
-      - rtpi_bridge
+      - rtpi_frontend
     volumes:
       - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/nginx:/etc/nginx/conf.d:ro
       - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/kasm_nginx.key:/etc/ssl/private/kasm_nginx.key
@@ -278,42 +358,21 @@ services:
       driver: "json-file"
       options:
         max-size: "10m"
-        max-file: "20"
+        max-file: "3"
 
-  # Empire C2 framework
-  ps-empire:
-    image: bcsecurity/empire:latest
-    container_name: ps-empire
-    restart: unless-stopped
-    networks:
-      - rtpi_bridge
-    ports:
-      - "1337:1337"
-      - "5000:5000"
-    volumes:
-      - empire_data:/empire
-    command: ./ps-empire server
+  # =============================================================================
+  # SYSREPTOR STACK
+  # =============================================================================
 
-  # Node.js service
-  node:
-    image: node:latest
-    container_name: node
-    restart: unless-stopped
-    networks:
-      - rtpi_bridge
-    ports:
-      - "3500:3500"
-
-  # SysReptor stack
   sysreptor-app:
     image: syslifters/sysreptor:2025.37
     container_name: sysreptor-app
     restart: unless-stopped
     networks:
       - sysreptor_default
-      - rtpi_bridge
+      - rtpi_backend
     ports:
-      - "9000:8000"
+      - "9000:8000"  # External access to SysReptor
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -327,6 +386,11 @@ services:
     command: /bin/bash /app/api/start.sh
     env_file:
       - ./configs/rtpi-sysreptor/app.env
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   sysreptor-caddy:
     image: caddy:latest
@@ -334,13 +398,18 @@ services:
     restart: unless-stopped
     networks:
       - sysreptor_default
-      - rtpi_bridge
+      - rtpi_frontend
     ports:
-      - "7777:7777"
+      - "7777:7777"  # External access to Caddy proxy
     volumes:
       - sysreptor-caddy-data:/data
       - ./configs/rtpi-sysreptor/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
     command: caddy reverse-proxy --from :7777 --to sysreptor-app:8000
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   sysreptor-db:
     image: postgres:14
@@ -348,6 +417,7 @@ services:
     restart: unless-stopped
     networks:
       - sysreptor_default
+      - rtpi_database
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 30s
@@ -359,6 +429,11 @@ services:
       - POSTGRES_PASSWORD=sysreptorpassword
       - POSTGRES_USER=sysreptor
       - POSTGRES_DB=sysreptor
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   sysreptor-redis:
     image: bitnami/redis:7.2
@@ -366,5 +441,69 @@ services:
     restart: unless-stopped
     networks:
       - sysreptor_default
+      - rtpi_backend
     environment:
       - REDIS_PASSWORD=sysreptorredispassword
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # =============================================================================
+  # SECURITY SERVICES
+  # =============================================================================
+
+  ps-empire:
+    image: bcsecurity/empire:latest
+    container_name: ps-empire
+    restart: unless-stopped
+    networks:
+      - rtpi_backend
+      - rtpi_frontend
+    ports:
+      - "1337:1337"  # Empire C2 (external access)
+      - "5000:5000"   # Empire REST API (external access)
+    volumes:
+      - empire_data:/empire
+    command: ./ps-empire server
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # =============================================================================
+  # UTILITY SERVICES
+  # =============================================================================
+
+  registry:
+    image: registry:latest
+    container_name: local-registry
+    restart: unless-stopped
+    networks:
+      - rtpi_backend
+    ports:
+      - "5001:5000"  # Docker Registry (external access - changed from 5000 to avoid conflict)
+    volumes:
+      - registry_data:/var/lib/registry
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  node:
+    image: node:latest
+    container_name: node-service
+    restart: unless-stopped
+    networks:
+      - rtpi_backend
+    ports:
+      - "3500:3500"  # Node.js service (external access)
+    command: ["node", "-e", "require('http').createServer((req,res)=>{res.end('Node.js service running')}).listen(3500)"]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -23,12 +23,6 @@ networks:
       config:
         - subnet: "172.20.0.0/16"
           gateway: "172.20.0.1"
-  npm_network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: "172.21.0.0/16"
-          gateway: "172.21.0.1"
 
 volumes:
   # Hashed volumes
@@ -81,51 +75,8 @@ volumes:
       type: none
       device: /var/lib/docker/volumes/portainer_data/_data
       o: bind
-  npm_data:
-    driver: local
-  npm_letsencrypt:
-    driver: local
-  npm_mysql:
-    driver: local
 
 services:
-  # Nginx Proxy Manager
-  npm_app:
-    image: 'jc21/nginx-proxy-manager:latest'
-    container_name: npm_app
-    restart: unless-stopped
-    ports:
-      - '80:80'   # Public HTTP Port
-      - '81:81'   # Admin Web Port
-      - '443:443' # Public HTTPS Port
-    environment:
-      DB_MYSQL_HOST: "npm_db"
-      DB_MYSQL_PORT: 3306
-      DB_MYSQL_USER: "npm"
-      DB_MYSQL_PASSWORD: "T0t4llyCh4ng3Th15P455word"
-      DB_MYSQL_NAME: "npm"
-    volumes:
-      - npm_data:/data
-      - npm_letsencrypt:/etc/letsencrypt
-    networks:
-      - npm_network
-      - rtpi_bridge
-    depends_on:
-      - npm_db
-
-  npm_db:
-    image: 'jc21/mariadb-aria:latest'
-    container_name: npm_db
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: 'T0t4llyCh4ng3Th15P455word'
-      MYSQL_DATABASE: 'npm'
-      MYSQL_USER: 'npm'
-      MYSQL_PASSWORD: 'T0t4llyCh4ng3Th15P455word'
-    volumes:
-      - npm_mysql:/var/lib/mysql
-    networks:
-      - npm_network
 
   # Docker stack
   kasm_agent:
@@ -227,7 +178,7 @@ services:
       kasm_default_network:
         ipv4_address: 172.18.0.9
     ports:
-      - "8443:443"  # Changed from 443:443 to avoid conflict with npm_app
+      - "8443:443"  # HTTPS port for Kasm proxy
     volumes:
       - /opt/kasm/1.15.0/conf/nginx:/etc/nginx/conf.d:ro
       - /opt/kasm/1.15.0/certs/kasm_nginx.crt:/etc/ssl/certs/kasm_nginx.crt:rw
