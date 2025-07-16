@@ -9,19 +9,19 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.28.0.0/16
   rtpi_backend:
     driver: bridge
     internal: true
     ipam:
       config:
-        - subnet: 172.21.0.0/16
+        - subnet: 172.29.0.0/16
   rtpi_database:
     driver: bridge
     internal: true
     ipam:
       config:
-        - subnet: 172.22.0.0/16
+        - subnet: 172.30.0.0/16
   kasm_default_network:
     driver: bridge
   sysreptor_default:
@@ -36,6 +36,8 @@ volumes:
   rtpi_orchestrator_data:
     driver: local
   rtpi_tools_data:
+    driver: local
+  rtpi_healer_data:
     driver: local
   
   # Application Service Volumes
@@ -53,6 +55,69 @@ volumes:
     driver: local
 
 services:
+  # =============================================================================
+  # SELF-HEALING INFRASTRUCTURE
+  # =============================================================================
+
+  rtpi-healer:
+    build:
+      context: ./services/rtpi-healer
+      dockerfile: Dockerfile
+    image: rtpi-pen/healer:latest
+    container_name: rtpi-healer
+    restart: unless-stopped
+    user: root  # Run as root for Docker socket access
+    privileged: true  # Grant full Docker access
+    networks:
+      - rtpi_frontend
+      - rtpi_backend
+      - rtpi_database
+    ports:
+      - "8888:8888"  # Health monitoring API
+    volumes:
+      - rtpi_healer_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - /opt:/opt
+      - ./:/home/cmndcntrl/rtpi-pen:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    depends_on:
+      - rtpi-database
+      - rtpi-cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # System initialization service
+  rtpi-init:
+    build:
+      context: ./services/rtpi-healer
+      dockerfile: Dockerfile
+    image: rtpi-pen/healer:latest
+    container_name: rtpi-init
+    restart: "no"
+    networks:
+      - rtpi_backend
+    volumes:
+      - /opt:/opt
+      - ./:/home/cmndcntrl/rtpi-pen:ro
+    command: ["/bin/bash", "/opt/rtpi-healer/scripts/init-system.sh"]
+    user: root
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # =============================================================================
   # CORE INFRASTRUCTURE SERVICES
   # =============================================================================
@@ -214,7 +279,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-    command: postgres -c ssl=on -c ssl_cert_file=/etc/ssl/certs/db_server.crt -c ssl_key_file=/etc/ssl/certs/db_server.key -c config_file=/var/lib/postgresql/conf/postgresql.conf -c hba_file=/var/lib/postgresql/conf/pg_hba.conf
+    command: postgres -c ssl=off -c config_file=/var/lib/postgresql/conf/postgresql.conf -c hba_file=/var/lib/postgresql/conf/pg_hba.conf
     restart: "always"
 
   kasm_redis:
@@ -245,6 +310,18 @@ services:
     volumes:
       - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
       - /opt/kasm/${KASM_VERSION:-1.15.0}/tmp/api:/tmp
+    environment:
+      - INSTALLATION_ID=rtpi-pen-installation-2025
+      - SERVER_ID=rtpi-pen-server-2025
+      - SHARE_ID=rtpi-pen-share-2025
+      - MANAGER_ID=rtpi-pen-manager-2025
+      - PUBLIC_HOSTNAME=localhost
+      - REDIS_PASSWORD=CwoZWGpBk5PZ3zD79fIK
+      - DATABASE_PASSWORD=${POSTGRES_PASSWORD_KASM:-SjenXuTppFFSWIIKjaAJ}
+      - DATABASE_USER=${POSTGRES_USER_KASM:-kasmapp}
+      - DATABASE_HOST=kasm_db
+      - DATABASE_PORT=5432
+      - DATABASE_SSL=false
     depends_on:
       - kasm_db
     restart: always
