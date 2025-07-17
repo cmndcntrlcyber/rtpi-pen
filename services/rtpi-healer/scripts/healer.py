@@ -369,6 +369,69 @@ password_encryption = md5
         
         return True
     
+    def check_kasm_health(self) -> bool:
+        """Check Kasm Workspaces health - supports both native and containerized installations"""
+        try:
+            # Check if native Kasm installation is running
+            if os.getenv('KASM_INSTALLED') == 'true':
+                # Check systemctl status for native Kasm
+                try:
+                    result = subprocess.run(['systemctl', 'is-active', 'kasm'], 
+                                          capture_output=True, text=True, timeout=10)
+                    if result.returncode == 0 and result.stdout.strip() == 'active':
+                        logger.info("✅ Native Kasm service is active")
+                        
+                        # Check Kasm API endpoint
+                        try:
+                            response = requests.get('https://localhost:8443/api/public/get_token', 
+                                                  verify=False, timeout=10)
+                            if response.status_code == 200:
+                                logger.info("✅ Kasm Workspaces API is healthy")
+                                return True
+                        except requests.RequestException as e:
+                            logger.warning(f"Kasm API check failed: {e}")
+                            return False
+                    else:
+                        logger.warning(f"Native Kasm service is not active: {result.stdout.strip()}")
+                        return False
+                except subprocess.TimeoutExpired:
+                    logger.warning("Kasm systemctl check timed out")
+                    return False
+                except Exception as e:
+                    logger.warning(f"Error checking native Kasm service: {e}")
+                    return False
+            else:
+                # Check if Kasm containers are running (legacy mode)
+                kasm_containers = [
+                    'kasm_api', 'kasm_manager', 'kasm_agent', 
+                    'kasm_share', 'kasm_guac', 'kasm_proxy', 'kasm_redis'
+                ]
+                
+                for container_name in kasm_containers:
+                    try:
+                        container = self.docker_client.containers.get(container_name)
+                        if container.status != 'running':
+                            logger.warning(f"Kasm container {container_name} is not running: {container.status}")
+                            return False
+                    except docker.errors.NotFound:
+                        logger.warning(f"Kasm container {container_name} not found")
+                        return False
+                
+                # Check Kasm API endpoint
+                try:
+                    response = requests.get('https://localhost:8443/api/public/get_token', 
+                                          verify=False, timeout=10)
+                    if response.status_code == 200:
+                        logger.info("✅ Kasm Workspaces API is healthy")
+                        return True
+                except requests.RequestException as e:
+                    logger.warning(f"Kasm API check failed: {e}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error checking Kasm health: {e}")
+            return False
+    
     def _get_container_status(self, container_name: str) -> Dict:
         """Get detailed container status"""
         try:

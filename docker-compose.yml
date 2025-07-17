@@ -43,11 +43,7 @@ volumes:
   # Application Service Volumes
   sysreptor-app-data:
     driver: local
-  sysreptor-db-data:
-    driver: local
   sysreptor-caddy-data:
-    driver: local
-  kasm_db_1.15.0:
     driver: local
   empire_data:
     driver: local
@@ -251,37 +247,6 @@ services:
   # KASM WORKSPACES STACK
   # =============================================================================
 
-  kasm_db:
-    container_name: kasm_db
-    image: postgres:${POSTGRES_VERSION_KASM:-12-alpine}
-    healthcheck:
-      test: "pg_isready --username=${POSTGRES_USER_KASM:-kasmapp} && cat /proc/1/cmdline | grep -q '^postgres'"
-      timeout: 5s
-      retries: 20
-    networks:
-      - kasm_default_network
-      - rtpi_backend
-    environment:
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD_KASM:-SjenXuTppFFSWIIKjaAJ}"
-      POSTGRES_USER: ${POSTGRES_USER_KASM:-kasmapp}
-      POSTGRES_DB: ${POSTGRES_DB_KASM:-kasm}
-    volumes:
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/data.sql:/docker-entrypoint-initdb.d/data.sql
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/pg_hba.conf:/var/lib/postgresql/conf/pg_hba.conf
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/postgresql.conf:/var/lib/postgresql/conf/postgresql.conf
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/:/tmp/
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/db_server.crt:/etc/ssl/certs/db_server.crt
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/db_server.key:/etc/ssl/certs/db_server.key
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/log/postgres/:/var/log/postgres/
-      - kasm_db_1.15.0:/var/lib/postgresql/data
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    command: postgres -c ssl=off -c config_file=/var/lib/postgresql/conf/postgresql.conf -c hba_file=/var/lib/postgresql/conf/pg_hba.conf
-    restart: "always"
-
   kasm_redis:
     container_name: kasm_redis
     command: ["sh", "-c", "redis-server --requirepass $${REDIS_PASSWORD}"]
@@ -307,6 +272,7 @@ services:
     networks:
       - kasm_default_network
       - rtpi_backend
+      - rtpi_database
     volumes:
       - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
       - /opt/kasm/${KASM_VERSION:-1.15.0}/tmp/api:/tmp
@@ -319,11 +285,11 @@ services:
       - REDIS_PASSWORD=CwoZWGpBk5PZ3zD79fIK
       - DATABASE_PASSWORD=${POSTGRES_PASSWORD_KASM:-SjenXuTppFFSWIIKjaAJ}
       - DATABASE_USER=${POSTGRES_USER_KASM:-kasmapp}
-      - DATABASE_HOST=kasm_db
+      - DATABASE_HOST=rtpi-database
       - DATABASE_PORT=5432
       - DATABASE_SSL=false
     depends_on:
-      - kasm_db
+      - rtpi-database
     restart: always
     logging:
       driver: "json-file"
@@ -339,10 +305,11 @@ services:
     networks:
       - kasm_default_network
       - rtpi_backend
+      - rtpi_database
     volumes:
       - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
     depends_on:
-      - kasm_db
+      - rtpi-database
     restart: always
     logging:
       driver: "json-file"
@@ -379,11 +346,12 @@ services:
     networks:
       - kasm_default_network
       - rtpi_backend
+      - rtpi_database
     volumes:
       - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
     restart: always
     depends_on:
-      - kasm_db
+      - rtpi-database
       - kasm_redis
     logging:
       driver: "json-file"
@@ -448,6 +416,7 @@ services:
     networks:
       - sysreptor_default
       - rtpi_backend
+      - rtpi_database
     ports:
       - "9000:8000"  # External access to SysReptor
     healthcheck:
@@ -458,7 +427,7 @@ services:
     volumes:
       - sysreptor-app-data:/app/data
     depends_on:
-      - sysreptor-db
+      - rtpi-database
       - sysreptor-redis
     command: /bin/bash /app/api/start.sh
     env_file:
@@ -488,29 +457,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  sysreptor-db:
-    image: postgres:14
-    container_name: sysreptor-db
-    restart: unless-stopped
-    networks:
-      - sysreptor_default
-      - rtpi_database
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    volumes:
-      - sysreptor-db-data:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_PASSWORD=sysreptorpassword
-      - POSTGRES_USER=sysreptor
-      - POSTGRES_DB=sysreptor
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   sysreptor-redis:
     image: bitnami/redis:7.2

@@ -138,7 +138,63 @@ sudo ./deploy-self-healing.sh --clean    # Clean up everything
 sudo ./deploy-self-healing.sh --verify   # Verify deployment status
 ```
 
-## 🔧 Method 2: Standard Multi-Container (Primary)
+## 🚀 Method 2: Kasm-First Deployment (Recommended)
+
+The Kasm-first deployment installs Kasm Workspaces natively on the host system first, then deploys the remaining services via Docker Compose. This approach provides better performance and integration for Kasm.
+
+### Features:
+- **Native Kasm Installation**: Installs Kasm directly on the host system using official packages
+- **Improved Performance**: Native installation provides better resource utilization
+- **Offline Installation**: Downloads and installs Kasm packages locally
+- **Integrated Monitoring**: Self-healing service can monitor both native and containerized services
+- **Flexible Deployment**: Can install Kasm first, then add containers later
+
+### Usage:
+```bash
+# Make Kasm-first build script executable
+chmod +x build-kasm-first.sh
+
+# Full deployment (Kasm + containers) - requires root
+sudo ./build-kasm-first.sh install
+
+# Install only Kasm natively
+sudo ./build-kasm-first.sh kasm-only
+
+# Deploy containers after Kasm installation
+./build-kasm-first.sh containers
+
+# Check status of all services
+./build-kasm-first.sh status
+```
+
+### Management Commands:
+```bash
+# Check status of all services
+./build-kasm-first.sh status
+
+# Stop all services
+sudo ./build-kasm-first.sh stop
+
+# Restart all services
+sudo ./build-kasm-first.sh restart
+
+# View Kasm logs
+sudo journalctl -u kasm -f
+
+# View container logs
+docker compose -f docker-compose-kasm-first.yml logs -f [service]
+```
+
+### Kasm-First Access:
+| Service | Primary URL | Direct URL | Description |
+|---------|-------------|------------|-------------|
+| **Kasm Workspaces** | https://localhost:8443 | https://localhost:8443 | Native Kasm installation |
+| **Main Dashboard** | https://localhost | - | Unified access portal |
+| **Portainer** | https://localhost/portainer/ | http://localhost:9444 | Container management |
+| **SysReptor** | https://localhost/sysreptor/ | http://localhost:9000 | Reporting platform |
+| **Empire C2** | https://localhost/empire/ | http://localhost:1337 | Command & Control |
+
+## 🔧 Method 3: Standard Multi-Container (Primary)
 
 The standard multi-container deployment using the build script for regular operations.
 
