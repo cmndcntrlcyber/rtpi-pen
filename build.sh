@@ -168,7 +168,7 @@ cleanup_port_8443_conflicts() {
     if [ -f "/opt/rtpi-pen/docker-compose.yml" ]; then
         log "Stopping docker-compose services..."
         cd /opt/rtpi-pen
-        docker-compose down || true
+        docker compose down || true
         cd - > /dev/null
     fi
     
@@ -621,7 +621,7 @@ start_containerized_services() {
     log "Building and starting containerized services..."
     
     # Build images
-    if docker-compose build --no-cache; then
+    if docker compose build; then
         log "Docker images built successfully"
     else
         error "Failed to build Docker images"
@@ -629,7 +629,7 @@ start_containerized_services() {
     fi
     
     # Start services
-    if docker-compose up -d; then
+    if docker compose up -d; then
         log "Containerized services started successfully"
     else
         error "Failed to start containerized services"
@@ -650,7 +650,7 @@ wait_for_services() {
     for service in "${services[@]}"; do
         local retries=0
         while [ $retries -lt 30 ]; do
-            if docker-compose ps "$service" | grep -q "Up"; then
+            if docker compose ps "$service" | grep -q "Up"; then
                 log "$service is ready"
                 break
             else
@@ -777,8 +777,8 @@ validate_deployment() {
     fi
     
     # Check Docker services
-    local running_containers=$(docker-compose ps --services --filter "status=running" | wc -l)
-    local total_containers=$(docker-compose ps --services | wc -l)
+    local running_containers=$(docker compose ps --services --filter "status=running" | wc -l)
+    local total_containers=$(docker compose ps --services | wc -l)
     
     if [ "$running_containers" -eq "$total_containers" ]; then
         log "✅ All containerized services are running ($running_containers/$total_containers)"
@@ -802,10 +802,10 @@ show_final_status() {
     echo "• Healer API: http://localhost:8888/health"
     echo ""
     echo "🔧 Management Commands:"
-    echo "• View logs: docker-compose logs -f"
-    echo "• Restart services: docker-compose restart"
-    echo "• Stop services: docker-compose down"
-    echo "• Service status: docker-compose ps"
+    echo "• View logs: docker compose logs -f"
+    echo "• Restart services: docker compose restart"
+    echo "• Stop services: docker compose down"
+    echo "• Service status: docker compose ps"
     echo ""
     echo "🏥 Self-Healing Features:"
     echo "• Automatic container restart on failure"
@@ -825,8 +825,8 @@ show_final_status() {
 cleanup() {
     if [ $? -ne 0 ]; then
         error "Build failed. Cleaning up..."
-        docker-compose down 2>/dev/null || true
-        error "You may need to run 'docker-compose down' manually"
+        docker compose down 2>/dev/null || true
+        error "You may need to run 'docker compose down' manually"
     fi
 }
 
@@ -925,7 +925,7 @@ EOF
     
     echo ""
     echo "ℹ️  Build information saved to /opt/rtpi-pen-build.info"
-    echo "ℹ️  For troubleshooting, check logs with: docker-compose logs -f"
+    echo "ℹ️  For troubleshooting, check logs with: docker compose logs -f"
     
     if [ "$ENABLE_SSL" = true ]; then
         echo "ℹ️  SSL certificate management: $CERT_MANAGER"
