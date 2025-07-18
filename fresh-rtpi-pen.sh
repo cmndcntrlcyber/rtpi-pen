@@ -499,11 +499,8 @@ if [ "$SKIP_KASM_INSTALLATION" != "true" ]; then
     echo "Installing Kasm Workspaces..."
     tar -xf kasm_release_1.17.0.7f020d.tar.gz
     
-    # Set the environment variable to accept the EULA
-    ACCEPT_EULA=y
-    
     # Run the installation script with the necessary parameters
-    echo $ACCEPT_EULA | sudo bash -x kasm_release/install.sh -L 8443 \
+    sudo bash kasm_release/install.sh -L 8443 \
         --offline-workspaces /opt/kasm_release_workspace_images_amd64_1.17.0.7f020d.tar.gz \
         --offline-service /opt/kasm_release_service_images_amd64_1.17.0.7f020d.tar.gz \
         --offline-network-plugin /opt/kasm_release_plugin_images_amd64_1.17.0.7f020d.tar.gz
