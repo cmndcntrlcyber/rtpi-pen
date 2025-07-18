@@ -1,346 +1,488 @@
 #!/bin/bash
 
-# RTPI-PEN Multi-Container Build Script
-# This script builds and manages the decomposed microservices architecture
+# RTPI-PEN Unified Build Script
+# Complete system deployment with Native Kasm + Containerized Services + SSL Certificate Automation
+# Version: 1.18.0
 
-set -e
+set -e  # Exit on any error
+
+# Configuration
+DOMAIN="attck-node.net"
+CERT_MANAGER="./setup/cert_manager.sh"
+DNS_MANAGER="./setup/cloudflare_dns_manager.sh"
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
 NC='\033[0m' # No Color
 
-# Configuration
-COMPOSE_FILE="docker-compose.yml"
-PROJECT_NAME="rtpi-pen"
+# Global variables
+SLUG=""
+ENABLE_SSL=false
+SERVER_IP=""
 
-echo -e "${BLUE}🔴 RTPI-PEN Multi-Container Platform${NC}"
-echo -e "${BLUE}====================================${NC}"
-
-# Function to print status
-print_status() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+# Logging function
+log() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
 }
 
-print_warning() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+warn() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
 }
 
-print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+error() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
 }
 
-print_section() {
-    echo -e "${PURPLE}[SECTION]${NC} $1"
+info() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $1${NC}"
 }
 
-# Check if Docker is running
-check_docker() {
-    if ! docker info >/dev/null 2>&1; then
-        print_error "Docker is not running. Please start Docker and try again."
+# Display usage information
+usage() {
+    cat << EOF
+Usage: $0 [OPTIONS]
+
+RTPI-PEN Unified Build Script with SSL Certificate Automation
+
+Options:
+    --slug <slug>        Organizational slug for domain generation (required for SSL)
+    --enable-ssl         Enable SSL certificate generation
+    --server-ip <ip>     Server IP address for DNS records (auto-detected if not provided)
+    --help               Show this help message
+
+Examples:
+    $0 --slug c3s --enable-ssl
+    $0 --slug demo --enable-ssl --server-ip 192.168.1.100
+    $0 (basic deployment without SSL)
+
+Generated domains (with --slug c3s):
+    • c3s.attck-node.net           (Main dashboard)
+    • c3s-reports.attck-node.net   (SysReptor)
+    • c3s-empire.attck-node.net    (Empire C2)
+    • c3s-mgmt.attck-node.net      (Portainer)
+    • c3s-kasm.attck-node.net      (Kasm Workspaces)
+
+EOF
+}
+
+# Parse command line arguments
+parse_arguments() {
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --slug)
+                SLUG="$2"
+                shift 2
+                ;;
+            --enable-ssl)
+                ENABLE_SSL=true
+                shift
+                ;;
+            --server-ip)
+                SERVER_IP="$2"
+                shift 2
+                ;;
+            --help)
+                usage
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+        esac
+    done
+    
+    # Validate SSL requirements
+    if [ "$ENABLE_SSL" = true ] && [ -z "$SLUG" ]; then
+        error "SSL requires --slug parameter"
+        usage
+        exit 1
+    fi
+}
+
+# Auto-detect server IP
+detect_server_ip() {
+    if [ -z "$SERVER_IP" ]; then
+        log "Auto-detecting server IP address..."
+        
+        # Try multiple methods to detect IP
+        SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || curl -s ipecho.net/plain 2>/dev/null || echo "")
+        
+        if [ -z "$SERVER_IP" ]; then
+            # Fallback to local IP
+            SERVER_IP=$(hostname -I | awk '{print $1}')
+        fi
+        
+        if [ -z "$SERVER_IP" ]; then
+            error "Unable to detect server IP address. Please provide --server-ip parameter"
+            exit 1
+        fi
+        
+        log "Detected server IP: $SERVER_IP"
+    else
+        log "Using provided server IP: $SERVER_IP"
+    fi
+}
+
+# Check if running as root
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        error "This script must be run as root"
+        echo "Please run with: sudo ./build.sh"
+        exit 1
+    fi
+}
+
+# Validate environment
+validate_environment() {
+    log "Validating environment..."
+    
+    # Check if we're in the right directory
+    if [ ! -f "fresh-rtpi-pen.sh" ] || [ ! -f "docker-compose.yml" ]; then
+        error "Please run this script from the RTPI-PEN root directory"
         exit 1
     fi
     
-    if ! docker compose version >/dev/null 2>&1; then
-        print_error "Docker Compose (v2) is not available. Please install Docker with Compose v2."
+    # Check available disk space (minimum 10GB)
+    available_space=$(df . | tail -1 | awk '{print $4}')
+    if [ "$available_space" -lt 10485760 ]; then  # 10GB in KB
+        warn "Low disk space detected. Minimum 10GB recommended."
+    fi
+    
+    # Check internet connectivity
+    if ! ping -c 1 google.com &> /dev/null; then
+        error "Internet connectivity required for installation"
         exit 1
     fi
     
-    print_status "✅ Docker and Docker Compose are available"
+    log "Environment validation completed"
 }
 
-# Check system requirements
-check_requirements() {
-    print_section "Checking system requirements..."
+# Run fresh system setup
+run_fresh_setup() {
+    log "Starting fresh system setup..."
     
-    # Check available memory
-    if command -v free >/dev/null 2>&1; then
-        AVAILABLE_MEM=$(free -g | awk '/^Mem:/{print $7}')
-        if [ ${AVAILABLE_MEM} -lt 6 ]; then
-            print_warning "Available memory (${AVAILABLE_MEM}GB) is less than recommended 6GB for multi-container setup"
+    # Make script executable
+    chmod +x fresh-rtpi-pen.sh
+    
+    # Run the fresh setup script
+    if ./fresh-rtpi-pen.sh; then
+        log "Fresh system setup completed successfully"
+    else
+        error "Fresh system setup failed"
+        exit 1
+    fi
+}
+
+# Wait for system to stabilize
+wait_for_system() {
+    log "Waiting for system to stabilize..."
+    sleep 30
+    
+    # Check if Kasm is running
+    if systemctl is-active --quiet kasm; then
+        log "Kasm service is active"
+    else
+        warn "Kasm service is not yet active, waiting..."
+        sleep 60
+        if systemctl is-active --quiet kasm; then
+            log "Kasm service is now active"
         else
-            print_status "✅ Memory: ${AVAILABLE_MEM}GB available"
+            error "Kasm service failed to start"
+            exit 1
         fi
     fi
+}
+
+# Build and start containerized services
+start_containerized_services() {
+    log "Building and starting containerized services..."
     
-    # Check available disk space
-    AVAILABLE_DISK=$(df -BG . | awk 'NR==2{print $4}' | sed 's/G//')
-    if [ ${AVAILABLE_DISK} -lt 15 ]; then
-        print_warning "Available disk space (${AVAILABLE_DISK}GB) is less than recommended 15GB"
+    # Build images
+    if docker-compose build --no-cache; then
+        log "Docker images built successfully"
     else
-        print_status "✅ Disk: ${AVAILABLE_DISK}GB available"
+        error "Failed to build Docker images"
+        exit 1
     fi
     
-    # Check if critical ports are in use
-    PORTS=(80 443 1337 5000 8443 9000 9444)
-    for port in "${PORTS[@]}"; do
-        if netstat -tlnp 2>/dev/null | grep -q ":${port} "; then
-            print_warning "Port ${port} is already in use"
+    # Start services
+    if docker-compose up -d; then
+        log "Containerized services started successfully"
+    else
+        error "Failed to start containerized services"
+        exit 1
+    fi
+}
+
+# Wait for services to be ready
+wait_for_services() {
+    log "Waiting for services to be ready..."
+    
+    # Wait for database to be ready
+    info "Waiting for database services..."
+    sleep 30
+    
+    # Check critical services
+    local services=("rtpi-database" "rtpi-cache" "rtpi-healer")
+    for service in "${services[@]}"; do
+        local retries=0
+        while [ $retries -lt 30 ]; do
+            if docker-compose ps "$service" | grep -q "Up"; then
+                log "$service is ready"
+                break
+            else
+                info "Waiting for $service..."
+                sleep 10
+                ((retries++))
+            fi
+        done
+        
+        if [ $retries -eq 30 ]; then
+            error "$service failed to start within timeout"
+            exit 1
         fi
     done
 }
 
-# Build all services
-build_services() {
-    print_section "Building RTPI-PEN microservices..."
-    print_status "This may take 20-40 minutes depending on your system..."
-    
-    # Build core infrastructure services first
-    print_status "🗄️ Building database service..."
-    docker compose build rtpi-database
-    
-    print_status "⚡ Building cache service..."
-    docker compose build rtpi-cache
-    
-    print_status "🔧 Building tools service..."
-    docker compose build rtpi-tools
-    
-    print_status "🌐 Building proxy service..."
-    docker compose build rtpi-proxy
-    
-    print_status "🐳 Building orchestrator service..."
-    docker compose build rtpi-orchestrator
-    
-    # Build all remaining services
-    print_status "📦 Building remaining services..."
-    docker compose build
-    
-    print_status "✅ All services built successfully!"
-    
-    # Show image sizes
-    echo ""
-    print_section "Built Images:"
-    docker images | grep -E "(rtpi-pen|REPOSITORY)" | head -10
-}
-
-# Start all services
-start_services() {
-    print_section "Starting RTPI-PEN platform..."
-    
-    # Create environment file if it doesn't exist
-    if [ ! -f .env ]; then
-        create_env_file
+# SSL Certificate Generation Phase
+setup_ssl_certificates() {
+    if [ "$ENABLE_SSL" != true ]; then
+        log "SSL disabled, skipping certificate generation"
+        return 0
     fi
     
-    # Start core services first
-    print_status "🚀 Starting core infrastructure..."
-    docker compose up -d rtpi-database rtpi-cache
+    log "Phase 0.5: SSL Certificate Generation"
     
-    # Wait for database to be ready
-    print_status "⏳ Waiting for database to be ready..."
-    sleep 10
+    # Detect server IP for DNS records
+    detect_server_ip
     
-    # Start application services
-    print_status "🚀 Starting application services..."
-    docker compose up -d rtpi-orchestrator rtpi-proxy
+    # Create DNS A records for services
+    log "Creating DNS A records for $SLUG services..."
+    if ! "$DNS_MANAGER" create-records "$SLUG" "$SERVER_IP"; then
+        error "Failed to create DNS records"
+        exit 1
+    fi
     
-    # Start remaining services
-    print_status "🚀 Starting all remaining services..."
-    docker compose up -d
+    # Wait for DNS propagation
+    log "Waiting for DNS propagation..."
+    sleep 60
     
-    print_status "✅ All services started!"
+    # Generate SSL certificates
+    log "Generating SSL certificates for $SLUG..."
+    if ! "$CERT_MANAGER" full-setup "$SLUG"; then
+        error "Failed to generate SSL certificates"
+        exit 1
+    fi
     
-    # Show service status
-    show_status
+    # Update Docker Compose for SSL
+    update_docker_compose_ssl
     
-    # Show access information
-    show_access_info
+    log "✅ SSL certificates generated and configured"
 }
 
-# Create environment file
-create_env_file() {
-    print_status "Creating environment configuration..."
-    cat > .env << 'EOF'
-# RTPI-PEN Environment Configuration
-COMPOSE_PROJECT_NAME=rtpi-pen
-
-# Kasm Configuration
-KASM_VERSION=1.15.0
-KASM_UID=1000
-KASM_GID=1000
-POSTGRES_VERSION_KASM=12-alpine
-POSTGRES_USER_KASM=kasmapp
-POSTGRES_PASSWORD_KASM=SjenXuTppFFSWIIKjaAJ
-POSTGRES_DB_KASM=kasm
-REDIS_KASM_VERSION=5-alpine
-NGINX_VERSION=1.25.3
-
-# Database Configuration
-POSTGRES_PASSWORD=rtpi_secure_password
-REDIS_PASSWORD=rtpi_redis_password
-
-# Network Configuration
-RTPI_DOMAIN=localhost
-EOF
-    print_status "✅ Environment file created"
+# Update Docker Compose for SSL certificate mounting
+update_docker_compose_ssl() {
+    log "Updating Docker Compose for SSL certificate mounting..."
+    
+    # Create backup of original docker-compose.yml
+    cp docker-compose.yml docker-compose.yml.backup
+    
+    # Add certificate volume mount to proxy service
+    local cert_volume="      - /opt/rtpi-pen/certs/$SLUG:/opt/rtpi-pen/certs/$SLUG:ro"
+    
+    # Add the volume mount to rtpi-proxy service
+    if ! grep -q "/opt/rtpi-pen/certs" docker-compose.yml; then
+        # Find the volumes section of rtpi-proxy and add certificate mount
+        sed -i '/rtpi-proxy:/,/^[[:space:]]*[^[:space:]]/ {
+            /volumes:/a\
+      - /opt/rtpi-pen/certs:/opt/rtpi-pen/certs:ro
+        }' docker-compose.yml
+    fi
+    
+    log "Docker Compose updated for SSL"
 }
 
-# Show service status
-show_status() {
-    echo ""
-    print_section "Service Status:"
-    docker compose ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}"
-    
-    echo ""
-    print_section "Resource Usage:"
-    docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}" | head -10
+# Update final status display for SSL
+show_ssl_final_status() {
+    if [ "$ENABLE_SSL" = true ]; then
+        echo ""
+        echo "🔒 SSL-Enabled Access Points:"
+        echo "• Main Dashboard: https://$SLUG.$DOMAIN"
+        echo "• SysReptor: https://$SLUG-reports.$DOMAIN"
+        echo "• Empire C2: https://$SLUG-empire.$DOMAIN"
+        echo "• Portainer: https://$SLUG-mgmt.$DOMAIN"
+        echo "• Kasm Workspaces: https://$SLUG-kasm.$DOMAIN"
+        echo ""
+        echo "🔐 Certificate Information:"
+        echo "• Certificate Location: /opt/rtpi-pen/certs/$SLUG/"
+        echo "• Auto-renewal: Enabled (twice daily)"
+        echo "• Certificate Management: $CERT_MANAGER"
+        echo "• DNS Management: $DNS_MANAGER"
+        echo ""
+        echo "🌐 DNS Records Created:"
+        echo "• $SLUG.$DOMAIN -> $SERVER_IP"
+        echo "• $SLUG-reports.$DOMAIN -> $SERVER_IP"
+        echo "• $SLUG-empire.$DOMAIN -> $SERVER_IP"
+        echo "• $SLUG-mgmt.$DOMAIN -> $SERVER_IP"
+        echo "• $SLUG-kasm.$DOMAIN -> $SERVER_IP"
+    fi
 }
 
-# Show access information
-show_access_info() {
-    echo ""
-    print_section "🌐 Access Information:"
-    echo -e "  ${GREEN}Main Dashboard:${NC}     https://localhost"
-    echo -e "  ${GREEN}Portainer:${NC}          https://localhost/portainer/ or http://localhost:9444"
-    echo -e "  ${GREEN}Kasm Workspaces:${NC}    https://localhost/kasm/ or https://localhost:8443"
-    echo -e "  ${GREEN}SysReptor:${NC}          https://localhost/sysreptor/ or http://localhost:9000"
-    echo -e "  ${GREEN}Empire C2:${NC}          https://localhost/empire/ or http://localhost:1337"
-    echo -e "  ${GREEN}Docker Registry:${NC}    http://localhost:5001"
+# Validate deployment
+validate_deployment() {
+    log "Validating deployment..."
     
-    echo ""
-    print_section "🔧 Management Commands:"
-    echo "  View logs:      docker compose logs -f [service]"
-    echo "  Scale service:  docker compose up -d --scale [service]=N"
-    echo "  Shell access:   docker compose exec [service] /bin/bash"
-    echo "  Restart all:    docker compose restart"
-    echo "  Stop all:       docker compose down"
-    
-    echo ""
-    print_warning "⏳ Please wait 2-3 minutes for all services to fully initialize"
-}
-
-# Show logs for all or specific service
-show_logs() {
-    if [ -n "$2" ]; then
-        print_status "Showing logs for $2..."
-        docker compose logs -f "$2"
+    # Check Kasm Workspaces
+    if curl -k -s https://localhost:8443/api/public/get_token | grep -q "token"; then
+        log "✅ Kasm Workspaces API is responding"
     else
-        print_status "Showing logs for all services (Ctrl+C to exit)..."
-        docker compose logs -f
+        warn "⚠️  Kasm Workspaces API not yet ready"
+    fi
+    
+    # Check Portainer
+    if curl -s http://localhost:9443 | grep -q "Portainer"; then
+        log "✅ Portainer is responding"
+    else
+        warn "⚠️  Portainer not yet ready"
+    fi
+    
+    # Check healer service
+    if curl -s http://localhost:8888/health | grep -q "status"; then
+        log "✅ Self-healing service is responding"
+    else
+        warn "⚠️  Self-healing service not yet ready"
+    fi
+    
+    # Check Docker services
+    local running_containers=$(docker-compose ps --services --filter "status=running" | wc -l)
+    local total_containers=$(docker-compose ps --services | wc -l)
+    
+    if [ "$running_containers" -eq "$total_containers" ]; then
+        log "✅ All containerized services are running ($running_containers/$total_containers)"
+    else
+        warn "⚠️  Some services may still be starting ($running_containers/$total_containers)"
     fi
 }
 
-# Stop all services
-stop_services() {
-    print_section "Stopping RTPI-PEN platform..."
-    docker compose down
-    print_status "✅ All services stopped"
+# Show final status
+show_final_status() {
+    echo ""
+    echo "=============================================="
+    echo "🎉 RTPI-PEN DEPLOYMENT COMPLETED"
+    echo "=============================================="
+    echo ""
+    echo "🌐 Access Points:"
+    echo "• Kasm Workspaces: https://localhost:8443"
+    echo "• Portainer: https://localhost:9443"
+    echo "• SysReptor: http://localhost:7777"
+    echo "• Empire C2: http://localhost:1337"
+    echo "• Healer API: http://localhost:8888/health"
+    echo ""
+    echo "🔧 Management Commands:"
+    echo "• View logs: docker-compose logs -f"
+    echo "• Restart services: docker-compose restart"
+    echo "• Stop services: docker-compose down"
+    echo "• Service status: docker-compose ps"
+    echo ""
+    echo "🏥 Self-Healing Features:"
+    echo "• Automatic container restart on failure"
+    echo "• Native Kasm service monitoring"
+    echo "• Health checks every 30 seconds"
+    echo "• Configuration backup every 6 hours"
+    echo ""
+    echo "📋 Default Credentials:"
+    echo "• Kasm: admin@kasm.local / password"
+    echo "• Portainer: admin / admin (set on first login)"
+    echo ""
+    echo "🚀 System is ready for Red Team operations!"
+    echo "=============================================="
 }
 
-# Restart all services
-restart_services() {
-    print_section "Restarting RTPI-PEN platform..."
-    docker compose restart
-    print_status "✅ All services restarted"
-    show_status
-}
-
-# Clean up everything
+# Cleanup function
 cleanup() {
-    print_warning "This will remove all containers, images, and volumes."
-    print_warning "All data will be lost permanently!"
-    read -p "Are you sure? (type 'YES' to confirm): " -r
-    if [[ $REPLY == "YES" ]]; then
-        print_section "Cleaning up RTPI-PEN platform..."
-        docker compose down -v --rmi all --remove-orphans
-        docker system prune -f
-        print_status "✅ Cleanup completed"
-    else
-        print_status "Cleanup cancelled"
+    if [ $? -ne 0 ]; then
+        error "Build failed. Cleaning up..."
+        docker-compose down 2>/dev/null || true
+        error "You may need to run 'docker-compose down' manually"
     fi
 }
 
-# Shell access to specific service
-shell_access() {
-    if [ -n "$2" ]; then
-        SERVICE="$2"
+# Main execution
+main() {
+    # Parse command line arguments
+    parse_arguments "$@"
+    
+    # Set up cleanup trap
+    trap cleanup EXIT
+    
+    echo "🚀 Starting RTPI-PEN Build Process..."
+    echo "======================================"
+    
+    if [ "$ENABLE_SSL" = true ]; then
+        log "SSL Mode: ENABLED for slug: $SLUG"
+        log "Domain: $DOMAIN"
     else
-        echo "Available services:"
-        docker compose ps --services
-        read -p "Enter service name: " SERVICE
+        log "SSL Mode: DISABLED"
     fi
     
-    print_status "Accessing shell for $SERVICE..."
-    docker compose exec "$SERVICE" /bin/bash || docker compose exec "$SERVICE" /bin/sh
-}
-
-# Update services
-update_services() {
-    print_section "Updating RTPI-PEN services..."
-    docker compose pull
-    docker compose up -d --build
-    print_status "✅ Services updated"
-}
-
-# Main menu
-show_menu() {
+    # Pre-flight checks
+    check_root
+    validate_environment
+    
+    # Phase 0.5: SSL Certificate Generation (if enabled)
+    if [ "$ENABLE_SSL" = true ]; then
+        setup_ssl_certificates
+    fi
+    
+    # Phase 1: Fresh system setup (native Kasm + system tools)
+    log "Phase 1: Fresh System Setup"
+    run_fresh_setup
+    wait_for_system
+    
+    # Phase 2: Containerized services
+    log "Phase 2: Containerized Services"
+    start_containerized_services
+    wait_for_services
+    
+    # Phase 3: Validation and status
+    log "Phase 3: Validation"
+    validate_deployment
+    show_final_status
+    show_ssl_final_status
+    
+    # Remove cleanup trap since we succeeded
+    trap - EXIT
+    
+    log "Build completed successfully!"
+    
+    # Save build information
+    cat > /opt/rtpi-pen-build.info << EOF
+RTPI-PEN Build Information
+Build Date: $(date)
+Build Script: build.sh v1.18.0
+Kasm Version: 1.17.0
+Architecture: Native Kasm + Containerized Services
+SSL Enabled: $ENABLE_SSL
+Slug: $SLUG
+Domain: $DOMAIN
+Server IP: $SERVER_IP
+Build Status: SUCCESS
+EOF
+    
     echo ""
-    echo -e "${BLUE}Available commands:${NC}"
-    echo "  build      - Build all microservices"
-    echo "  start      - Start all services (docker compose up -d)"
-    echo "  stop       - Stop all services"
-    echo "  restart    - Restart all services"
-    echo "  status     - Show service status and resource usage"
-    echo "  logs       - Show logs (optionally specify service name)"
-    echo "  shell      - Access shell of specific service"
-    echo "  update     - Update and rebuild services"
-    echo "  check      - Check system requirements"
-    echo "  cleanup    - Remove everything (destructive)"
-    echo "  help       - Show this help menu"
+    echo "ℹ️  Build information saved to /opt/rtpi-pen-build.info"
+    echo "ℹ️  For troubleshooting, check logs with: docker-compose logs -f"
+    
+    if [ "$ENABLE_SSL" = true ]; then
+        echo "ℹ️  SSL certificate management: $CERT_MANAGER"
+        echo "ℹ️  DNS management: $DNS_MANAGER"
+    fi
 }
 
-# Parse command line arguments
-case "${1:-help}" in
-    build)
-        check_docker
-        check_requirements
-        build_services
-        ;;
-    start|up)
-        check_docker
-        start_services
-        ;;
-    stop|down)
-        stop_services
-        ;;
-    restart)
-        restart_services
-        ;;
-    status)
-        show_status
-        ;;
-    logs)
-        show_logs "$@"
-        ;;
-    shell)
-        shell_access "$@"
-        ;;
-    update)
-        check_docker
-        update_services
-        ;;
-    check)
-        check_docker
-        check_requirements
-        ;;
-    cleanup)
-        cleanup
-        ;;
-    help|*)
-        show_menu
-        echo ""
-        echo -e "${YELLOW}Primary Usage:${NC}"
-        echo "  $0 build && $0 start    # First time setup"
-        echo "  $0 start                # Regular startup"
-        echo "  $0 status               # Check services"
-        echo ""
-        echo -e "${YELLOW}Quick Start:${NC}"
-        echo "  git clone <repo> && cd rtpi-pen"
-        echo "  chmod +x build.sh"
-        echo "  ./build.sh build        # Build all services"
-        echo "  ./build.sh start        # Start platform"
-        ;;
-esac
+# Run main function
+main "$@"

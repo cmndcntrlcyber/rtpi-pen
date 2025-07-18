@@ -1,22 +1,21 @@
 # RTPI-PEN: Red Team Penetration Infrastructure
 
-A comprehensive microservices-based platform for Red Team Penetration Infrastructure, providing security professionals with a complete toolkit for penetration testing, C2 operations, and security assessments.
+A comprehensive penetration testing platform providing security professionals with a complete toolkit for Red Team operations, C2 frameworks, security assessments, and automated SSL certificate management.
 
 ## 🎯 What's Included
 
-RTPI-PEN provides a pre-configured environment with multiple security-focused services deployed as microservices:
-
 ### Core Infrastructure Services
+- **🏥 Self-Healing Service** - Automated monitoring, repair, and recovery system
 - **🗄️ Database Service** - PostgreSQL with multiple databases (rtpi_main, kasm, sysreptor)
 - **⚡ Cache Service** - Redis cluster with multiple instances for different services
-- **🐳 Orchestrator Service** - Portainer for container management and orchestration
-- **🌐 Proxy Service** - Nginx reverse proxy with SSL termination and unified dashboard
-- **🔧 Tools Service** - Containerized security tools (Metasploit, Nmap, Hashcat, etc.)
+- **🐳 Orchestrator Service** - Portainer for container management
+- **🌐 Proxy Service** - Nginx reverse proxy with SSL termination
+- **🔧 Tools Service** - Containerized security tools
 
 ### Application Services
-- **🖥️ Kasm Workspaces** - Browser-based virtual desktops and isolation
+- **🖥️ Kasm Workspaces** - Browser-based virtual desktops (installed natively)
 - **📊 SysReptor** - Penetration testing documentation and reporting
-- **👑 PowerShell Empire** - Command & Control framework
+- **👑 PowerShell Empire** - Command & Control framework (installed natively)
 - **📦 Docker Registry** - Local container image registry
 - **🌐 Node.js Service** - Additional development/API service
 
@@ -27,217 +26,198 @@ RTPI-PEN provides a pre-configured environment with multiple security-focused se
 - **Active Directory**: Bloodhound, CrackMapExec, Impacket
 - **Web Tools**: Proxychains, curl, wget
 - **Development**: PowerShell, Python3, Java, Go, Node.js
-- **Windows Tools**: Wine, mingw-w64, PowerSploit, WinPwn
+- **Windows Tools**: Wine, mingw-w64, PowerSploit
 - **Frameworks**: PowerShell Empire, additional C2 tools
-
-## 🏗️ Architecture
-
-### Microservices Architecture
-```mermaid
-graph TB
-    subgraph "Frontend Network"
-        Proxy[rtpi-proxy:80,443]
-        Kasm[kasm_proxy:8443]
-        Portainer[rtpi-orchestrator:9444]
-    end
-    
-    subgraph "Backend Network"
-        Tools[rtpi-tools]
-        Empire[ps-empire:1337,5000]
-        SysReptor[sysreptor-app:9000]
-        Registry[registry:5001]
-        Node[node-service:3500]
-    end
-    
-    subgraph "Database Network"
-        DB[rtpi-database:5432]
-        Cache[rtpi-cache:6379,6380,6381]
-        SysDB[sysreptor-db]
-        KasmDB[kasm_db]
-    end
-    
-    Proxy --> Tools
-    Proxy --> Empire
-    Proxy --> SysReptor
-    Proxy --> Portainer
-    Proxy --> Kasm
-    
-    Tools --> Cache
-    Empire --> Cache
-    SysReptor --> SysDB
-    SysReptor --> Cache
-    Kasm --> KasmDB
-    Kasm --> Cache
-```
-
-### Network Segmentation
-- **rtpi_frontend**: Public-facing services (80, 443, 8443, 9444)
-- **rtpi_backend**: Internal application services (isolated)
-- **rtpi_database**: Database layer (isolated)
-- **kasm_default_network**: Kasm Workspaces internal network
-- **sysreptor_default**: SysReptor internal network
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Docker 20.10+ and Docker Compose v2
-- **Minimum**: 6GB RAM, 4 CPU cores, 15GB disk space
-- **Recommended**: 12GB+ RAM, 8+ CPU cores, 30GB+ disk space
+- **Operating System**: Ubuntu 20.04+ (tested)
+- **Docker**: 20.10+ with Docker Compose v2
+- **Access Level**: Root access required (sudo)
+- **Minimum**: 8GB RAM, 4 CPU cores, 20GB disk space
+- **Recommended**: 16GB+ RAM, 8+ CPU cores, 40GB+ disk space
 
-### Primary Deployment Method (Recommended)
+### Deployment Methods
 
-#### Using Build Script (Easiest)
+## 🏗️ Method 1: Fresh Installation (Recommended)
+
+The fresh installation method provides a complete setup with native Kasm Workspaces, native Empire C2, and containerized supporting services.
+
+### Features:
+- **Native Kasm Installation**: Installs Kasm Workspaces 1.17.0 directly on the host
+- **Native Empire C2**: Installs PowerShell Empire natively for better performance
+- **Containerized Services**: Supporting services run in Docker containers
+- **Automated Setup**: Complete system configuration and package installation
+- **Self-Healing**: Includes monitoring and repair capabilities
+
+### Usage:
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/rtpi-pen.git
+git clone https://github.com/attck-nexus/rtpi-pen.git
 cd rtpi-pen
 
-# Make build script executable
+# Make the script executable
+chmod +x fresh-rtpi-pen.sh
+
+# Run the complete installation (requires root)
+sudo ./fresh-rtpi-pen.sh
+
+# After installation, start containerized services
+docker compose up -d
+```
+
+## 🔒 Method 2: Advanced Build with SSL (Production)
+
+The advanced build method includes SSL certificate automation with Let's Encrypt and Cloudflare DNS.
+
+### Features:
+- **SSL Certificate Automation**: Automatic Let's Encrypt certificate generation
+- **Cloudflare DNS Management**: Automated DNS record creation
+- **Production Ready**: Secure configuration for production environments
+- **Custom Domain Support**: Support for custom organizational domains
+
+### Usage:
+```bash
+# Make the script executable
 chmod +x build.sh
 
-# Check system requirements
-./build.sh check
+# Deploy with SSL certificates for organization "myorg"
+sudo ./build.sh --slug myorg --enable-ssl
 
-# Build all microservices (20-40 minutes)
-./build.sh build
+# Deploy with custom server IP
+sudo ./build.sh --slug myorg --enable-ssl --server-ip 192.168.1.100
 
-# Start the platform
-./build.sh start
+# Standard deployment (no SSL)
+sudo ./build.sh
 ```
 
-#### Manual Deployment
-```bash
-# Build all services
-docker compose build
+**Generated SSL-enabled domains (example with slug 'myorg'):**
+- `myorg.attck-node.net` - Main dashboard
+- `myorg-reports.attck-node.net` - SysReptor 
+- `myorg-empire.attck-node.net` - Empire C2
+- `myorg-mgmt.attck-node.net` - Portainer
+- `myorg-kasm.attck-node.net` - Kasm Workspaces
 
-# Start all services
-docker compose up -d
-
-# Check status
-docker compose ps
-```
-
-### Legacy Single Container (Available)
-```bash
-# Access legacy single-container deployment
-cd legacy
-
-# Use the legacy build script
-chmod +x build-single-image.sh
-./build-single-image.sh build
-./build-single-image.sh run
-```
-
----
+For detailed SSL configuration, see [SSL_AUTOMATION_README.md](SSL_AUTOMATION_README.md).
 
 ## 🌐 Service Access
 
-### Multi-Container Setup Access (Primary)
+### Standard Access (Fresh Installation)
 
 | Service | Primary URL | Direct URL | Description |
 |---------|-------------|------------|-------------|
-| **Main Dashboard** | https://localhost | - | Unified access portal |
-| **Portainer** | https://localhost/portainer/ | http://localhost:9444 | Container management |
-| **Kasm Workspaces** | https://localhost/kasm/ | https://localhost:8443 | Virtual desktops |
-| **SysReptor** | https://localhost/sysreptor/ | http://localhost:9000 | Reporting platform |
-| **Empire C2** | https://localhost/empire/ | http://localhost:1337 | Command & Control |
-| **Docker Registry** | - | http://localhost:5001 | Local registry |
-| **Node.js Service** | - | http://localhost:3500 | Development service |
+| **Kasm Workspaces** | - | https://localhost:8443 | Virtual desktop environment |
+| **Empire C2** | - | http://localhost:1337 | Command & Control framework |
+| **Portainer** | - | https://localhost:9443 | Container management |
+| **SysReptor** | - | http://localhost:7777 | Reporting platform |
+| **Self-Healing API** | - | http://localhost:8888/health | Health monitoring |
+| **Docker Registry** | - | http://localhost:5001 | Local container registry |
 
----
+### SSL-Enabled Access (Advanced Build)
+
+| Service | SSL URL | Description |
+|---------|---------|-------------|
+| **Main Dashboard** | https://[slug].attck-node.net | Unified portal |
+| **SysReptor** | https://[slug]-reports.attck-node.net | Reporting platform |
+| **Empire C2** | https://[slug]-empire.attck-node.net | Command & Control |
+| **Portainer** | https://[slug]-mgmt.attck-node.net | Container management |
+| **Kasm Workspaces** | https://[slug]-kasm.attck-node.net | Virtual desktops |
+
+## 🌐 Custom Hostnames (Optional)
+
+RTPI-PEN includes a hosts configuration script that provides clean, memorable URLs for all services.
+
+### Configure Custom Hostnames
+```bash
+# Add custom hostnames to /etc/hosts
+sudo ./setup/configure-hosts.sh add
+
+# Remove custom hostnames
+sudo ./setup/configure-hosts.sh remove
+
+# Verify hostname resolution
+./setup/configure-hosts.sh verify
+
+# Show current RTPI-PEN entries
+./setup/configure-hosts.sh show
+
+# Backup current hosts file
+sudo ./setup/configure-hosts.sh backup
+
+# Restore from backup
+sudo ./setup/configure-hosts.sh restore
+```
+
+### Service Access with Custom Hostnames
+| Service | Custom URL | Standard URL |
+|---------|------------|--------------|
+| **Kasm Workspaces** | https://kasm.rtpi.local:8443 | https://localhost:8443 |
+| **Empire C2** | http://empire.rtpi.local:1337 | http://localhost:1337 |
+| **Portainer** | https://portainer.rtpi.local:9443 | https://localhost:9443 |
+| **SysReptor** | http://sysreptor.rtpi.local:7777 | http://localhost:7777 |
+| **Self-Healing API** | http://healer.rtpi.local:8888 | http://localhost:8888 |
+| **Docker Registry** | http://registry.rtpi.local:5001 | http://localhost:5001 |
+
+### Additional Hostnames
+The script also configures shorter alternative names:
+- `kasm.local`, `empire.local`, `portainer.local`, `sysreptor.local`
+- `admin.rtpi.local`, `dashboard.rtpi.local`, `tools.rtpi.local`
 
 ## 🔧 Management & Operations
 
-### Platform Management
-
-#### Using Build Script (Recommended)
+### System Management
 ```bash
-# View platform status
-./build.sh status
+# Check system status
+systemctl status kasm empire
 
-# View logs for all services
-./build.sh logs
+# View service logs
+journalctl -u kasm -f
+journalctl -u empire -f
 
-# View logs for specific service
-./build.sh logs rtpi-tools
+# Start/stop native services
+sudo systemctl start kasm empire
+sudo systemctl stop kasm empire
 
-# Access shell of specific service
-./build.sh shell rtpi-tools
-
-# Stop platform
-./build.sh stop
-
-# Restart platform
-./build.sh restart
-
-# Update services
-./build.sh update
-
-# Complete cleanup (destructive)
-./build.sh cleanup
+# Restart native services
+sudo systemctl restart kasm empire
 ```
 
-#### Manual Docker Compose Commands
+### Container Management
 ```bash
-# View all container status
+# View container status
 docker compose ps
 
-# View logs for all services
+# View all logs
 docker compose logs -f
 
-# View logs for specific service
-docker compose logs -f rtpi-tools
-
-# Scale specific service
-docker compose up -d --scale rtpi-tools=2
+# View specific service logs
+docker compose logs -f rtpi-healer
 
 # Restart specific service
-docker compose restart ps-empire
+docker compose restart rtpi-proxy
 
-# Stop all services
+# Stop all containers
 docker compose down
 
-# Remove everything including volumes
-docker compose down -v
+# Start all containers
+docker compose up -d
 ```
 
-### Service-Specific Management
-
-#### Database Service
+### Health Monitoring
 ```bash
-# Access database
-docker compose exec rtpi-database psql -U rtpi -d rtpi_main
+# Check self-healing service
+curl http://localhost:8888/health
 
-# View database logs
-docker compose logs rtpi-database
+# Check Empire C2 status
+curl http://localhost:1337/api/v2/admin/users
 
-# Database backup
-docker compose exec rtpi-database pg_dump -U rtpi rtpi_main > backup.sql
+# Check Kasm status
+curl -k https://localhost:8443/api/public/get_token
+
+# Check database connectivity
+docker compose exec rtpi-database pg_isready -U rtpi
 ```
-
-#### Tools Service
-```bash
-# Access tools container
-docker compose exec rtpi-tools /bin/bash
-
-# Run specific tools
-docker compose exec rtpi-tools msfconsole
-docker compose exec rtpi-tools nmap -h
-docker compose exec rtpi-tools hashcat --help
-```
-
-#### Cache Service
-```bash
-# Check cache status
-docker compose exec rtpi-cache redis-cli -p 6379 ping
-docker compose exec rtpi-cache redis-cli -p 6380 ping
-docker compose exec rtpi-cache redis-cli -p 6381 ping
-
-# Monitor cache
-docker compose exec rtpi-cache redis-cli -p 6379 monitor
-```
-
----
 
 ## 📁 Data Persistence
 
@@ -245,42 +225,45 @@ docker compose exec rtpi-cache redis-cli -p 6379 monitor
 - `rtpi_database_data` - Main PostgreSQL data
 - `rtpi_cache_data` - Redis cache data  
 - `rtpi_orchestrator_data` - Portainer configuration
-- `rtpi_tools_data` - Security tools data and configurations
+- `rtpi_tools_data` - Security tools data
+- `rtpi_healer_data` - Self-healing service data
 - `sysreptor-app-data` - SysReptor application data
-- `sysreptor-db-data` - SysReptor PostgreSQL database
-- `kasm_db_1.15.0` - Kasm database and settings
-- `empire_data` - Empire C2 framework data
+- `sysreptor-caddy-data` - Caddy proxy data
+- `empire_data` - Empire C2 framework data (if containerized)
 - `registry_data` - Local Docker registry data
+
+### Native Service Data
+- **Kasm Workspaces**: `/opt/kasm/current/`
+- **Empire C2**: `/opt/Empire/`
+- **SSL Certificates**: `/opt/rtpi-pen/certs/`
 
 ### Backup Strategy
 ```bash
-# Backup all volumes
+# Backup container volumes
 docker run --rm -v rtpi_database_data:/data -v $(pwd):/backup alpine tar czf /backup/database-backup.tar.gz -C /data .
 
-# Restore volumes
-docker run --rm -v rtpi_database_data:/data -v $(pwd):/backup alpine tar xzf /backup/database-backup.tar.gz -C /data
+# Backup native services
+sudo tar czf kasm-backup.tar.gz -C /opt/kasm/current .
+sudo tar czf empire-backup.tar.gz -C /opt/Empire .
+
+# Backup SSL certificates (if using advanced build)
+sudo tar czf certs-backup.tar.gz -C /opt/rtpi-pen/certs .
 ```
 
----
+## 🔐 Default Credentials
 
-## 🔐 Default Credentials & Configuration
+### Native Services
+- **Kasm Workspaces**: `admin@kasm.local` / `password` (change on first login)
+- **Empire C2**: `empireadmin` / `password123` (check `/opt/Empire/empire/server/config.yaml`)
+
+### Containerized Services
+- **Portainer**: `admin` / `admin` (set on first access)
+- **SysReptor**: No default credentials (set during first setup)
 
 ### Database Configuration
 - **Main Database**: `rtpi` / `rtpi_secure_password`
-- **Kasm Database**: `kasmapp` / `SjenXuTppFFSWIIKjaAJ`
 - **SysReptor Database**: `sysreptor` / `sysreptorpassword`
-
-### Cache Configuration  
-- **Main Redis (6379)**: `rtpi_redis_password`
-- **Kasm Redis (6380)**: `CwoZWGpBk5PZ3zD79fIK`
-- **SysReptor Redis (6381)**: `sysreptorredispassword`
-
-### SSL Configuration
-- **Certificates**: Auto-generated self-signed certificates
-- **Proxy**: SSL termination at nginx reverse proxy
-- **Internal**: Services communicate over internal networks
-
----
+- **Redis Cache**: `rtpi_redis_password`
 
 ## 🛠️ Development & Customization
 
@@ -290,76 +273,71 @@ docker run --rm -v rtpi_database_data:/data -v $(pwd):/backup alpine tar xzf /ba
 docker compose exec rtpi-tools /bin/bash
 
 # Install additional tools
-cd /opt/tools/custom
-git clone https://github.com/your-custom-tool.git
+apt update && apt install -y your-tool
 
 # Install Python packages
 pip3 install your-package
 
-# Install system packages
-sudo apt-get update && sudo apt-get install -y your-package
+# Access native Empire installation
+cd /opt/Empire
+./ps-empire client
 ```
 
 ### Modifying Services
 ```bash
-# Modify service configuration
+# Edit service configuration
 nano services/rtpi-proxy/nginx/conf.d/rtpi-pen.conf
 
-# Rebuild specific service
+# Rebuild and restart service
 docker compose build rtpi-proxy
-
-# Restart service
 docker compose restart rtpi-proxy
+
+# Edit native service configurations
+sudo nano /opt/kasm/current/conf/app/kasmweb.yaml
+sudo nano /opt/Empire/empire/server/config.yaml
 ```
-
-### Service Development
-```bash
-# Create new service
-mkdir services/my-service
-cd services/my-service
-
-# Create Dockerfile
-echo "FROM alpine:latest" > Dockerfile
-
-# Add to docker-compose.yml
-# Build and start
-docker compose build my-service
-docker compose up -d my-service
-```
-
----
 
 ## 🔍 Troubleshooting
 
-### Platform Won't Start
+### Installation Issues
 ```bash
-# Check system requirements
-./build.sh check
+# Check installation logs
+tail -f /var/log/syslog | grep -E "(kasm|empire)"
 
-# Check service logs
-docker compose logs
+# Verify native services
+systemctl status kasm empire
 
-# Check port conflicts
-netstat -tlnp | grep -E '(80|443|1337|5000|8443|9000|9444)'
+# Check container status
+docker compose ps
 
-# Check available resources
-docker system df
-docker stats --no-stream
+# Check for port conflicts
+sudo netstat -tlnp | grep -E "(80|443|1337|8443|9443)"
 ```
 
-### Service Not Responding
+### Service Not Starting
 ```bash
-# Check specific service status
-docker compose ps rtpi-proxy
+# Check specific service logs
+journalctl -u empire -f
+journalctl -u kasm -f
 
-# Check service logs
-docker compose logs rtpi-proxy
+# Check container logs
+docker compose logs rtpi-healer
 
-# Restart specific service
-docker compose restart rtpi-proxy
+# Check file permissions
+ls -la /opt/Empire/ps-empire
+ls -la /opt/kasm/current/
+```
 
-# Check service health
-docker compose exec rtpi-proxy curl -f http://localhost/health
+### Network Issues
+```bash
+# Check Docker networks
+docker network ls
+
+# Test connectivity
+docker compose exec rtpi-proxy ping rtpi-database
+
+# Check firewall rules
+sudo ufw status
 ```
 
 ### Database Issues
@@ -374,55 +352,25 @@ docker compose exec rtpi-database psql -U rtpi -d rtpi_main
 docker compose logs rtpi-database
 ```
 
-### Network Issues
-```bash
-# Check Docker networks
-docker network ls
-
-# Inspect network configuration
-docker network inspect rtpi-pen_rtpi_frontend
-docker network inspect rtpi-pen_rtpi_backend
-
-# Test service connectivity
-docker compose exec rtpi-proxy ping rtpi-database
-```
-
-### Performance Issues
-```bash
-# Check resource usage
-docker stats --no-stream
-
-# Check service resource limits
-docker compose exec rtpi-tools free -h
-docker compose exec rtpi-tools df -h
-
-# Scale problematic services
-docker compose up -d --scale rtpi-tools=2
-```
-
----
-
 ## 📊 System Requirements
 
-### Minimum Requirements (Multi-Container)
-- **RAM**: 6GB
-- **CPU**: 4 cores  
-- **Disk**: 15GB free space
-- **OS**: Linux, macOS, Windows with Docker
+### Minimum Requirements
+- **RAM**: 8GB
+- **CPU**: 4 cores
+- **Disk**: 20GB free space
+- **Network**: Internet connectivity for initial setup
 
 ### Recommended Requirements
-- **RAM**: 12GB+
+- **RAM**: 16GB+
 - **CPU**: 8+ cores
-- **Disk**: 30GB+ free space
-- **Network**: Stable internet for initial build
+- **Disk**: 40GB+ free space
+- **Network**: Dedicated network segment
 
-### Performance Comparison
-| Deployment | RAM Usage | Build Time | Complexity | Scalability |
-|------------|-----------|------------|------------|-------------|
-| Multi-Container | 6-12GB | 20-40 min | Medium | High |
-| Single Container | 4-8GB | 15-30 min | Low | Low |
-
----
+### Performance Considerations
+- **Native Services**: Kasm and Empire run natively for better performance
+- **Containerized Services**: Supporting services run in isolated containers
+- **Network**: Internal container networks for security
+- **Storage**: Persistent volumes for data retention
 
 ## 🔒 Security Considerations
 
@@ -432,90 +380,70 @@ This platform includes penetration testing tools and frameworks designed for aut
 
 ### Security Features
 - **Network Segmentation**: Services isolated by function
-- **SSL Termination**: Centralized certificate management
-- **Access Controls**: Role-based access through Portainer
-- **Logging**: Centralized logging for all services
-- **Health Monitoring**: Built-in health checks
+- **SSL Support**: Automated certificate management
+- **Access Controls**: Role-based access through services
+- **Container Isolation**: Strict isolation between services
+- **Native Security**: Critical services run natively for better control
 
 ### Security Best Practices
 - **Only use in authorized environments**
 - **Isolate from production networks**
 - **Change default passwords immediately**
-- **Keep containers updated regularly**
+- **Keep services updated regularly**
 - **Monitor service logs for anomalies**
-- **Use proper network segmentation**
-- **Implement additional firewall rules**
+- **Use proper firewall rules**
+- **Implement network segmentation**
 
-### Network Security
-```bash
-# View network configuration
-docker network ls
-docker network inspect rtpi-pen_rtpi_frontend
+## 📋 File Structure
 
-# Monitor network traffic
-docker compose exec rtpi-proxy tail -f /var/log/nginx/access.log
-
-# Update SSL certificates
-docker compose exec rtpi-proxy openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout /etc/nginx/ssl/rtpi.key -out /etc/nginx/ssl/rtpi.crt
 ```
-
----
+rtpi-pen/
+├── fresh-rtpi-pen.sh          # Main installation script
+├── build.sh                   # Advanced build with SSL
+├── docker-compose.yml         # Container orchestration
+├── README.md                  # This file
+├── SSL_AUTOMATION_README.md   # SSL configuration guide
+├── configs/                   # Configuration files
+│   ├── rtpi-empire/          # Empire C2 configuration
+│   └── rtpi-sysreptor/       # SysReptor configuration
+├── services/                  # Container service definitions
+│   ├── rtpi-cache/           # Redis cache service
+│   ├── rtpi-database/        # PostgreSQL database
+│   ├── rtpi-healer/          # Self-healing service
+│   ├── rtpi-orchestrator/    # Portainer service
+│   ├── rtpi-proxy/           # Nginx reverse proxy
+│   ├── rtpi-tools/           # Security tools container
+│   └── rtpi-web/             # Web dashboard
+├── setup/                    # Setup and maintenance scripts
+│   ├── cert_manager.sh       # SSL certificate management
+│   ├── cert_renewal.sh       # Certificate renewal
+│   └── cloudflare_dns_manager.sh # DNS management
+├── legacy/                   # Legacy deployment methods
+└── repair-scripts/           # Emergency repair scripts
+```
 
 ## 🆘 Support & Contributing
 
 ### Getting Help
 1. Check the troubleshooting section above
-2. Review service logs: `./build.sh logs [service]`
-3. Ensure all system requirements are met: `./build.sh check`
-4. Verify no port conflicts exist
+2. Review service logs: `journalctl -u [service]` or `docker compose logs [service]`
+3. Check system requirements and port conflicts
+4. Verify all services are running: `systemctl status kasm empire`
 
 ### Contributing
-We welcome contributions! Please:
 1. Fork the repository
 2. Create a feature branch
-3. Test your changes with both deployment methods
+3. Test your changes thoroughly
 4. Submit a pull request with detailed description
 
 ### Reporting Issues
 When reporting issues, please include:
-- Deployment method used (multi-container vs single-container)
-- System specifications (OS, RAM, CPU)
-- Output of `./build.sh check`
-- Service logs and error messages
-- Steps to reproduce the issue
-
-### Development Workflow
-```bash
-# Development setup
-git clone <fork-url>
-cd rtpi-pen
-
-# Create feature branch
-git checkout -b feature/my-feature
-
-# Test changes
-./build.sh build
-./build.sh start
-
-# Submit PR
-git push origin feature/my-feature
-```
-
----
-
-## 📋 Deployment Comparison
-
-| Feature | Multi-Container (Primary) | Single Container (Legacy) |
-|---------|---------------------------|---------------------------|
-| **Scalability** | ✅ Individual service scaling | ❌ Scale entire stack |
-| **Resource Usage** | ✅ Efficient resource allocation | ⚠️ Higher resource usage |
-| **Development** | ✅ Service-specific development | ❌ Monolithic development |
-| **Maintenance** | ✅ Update individual services | ❌ Update entire container |
-| **Complexity** | ⚠️ More complex setup | ✅ Simple setup |
-| **Build Time** | ⚠️ 20-40 minutes | ✅ 15-30 minutes |
-| **Isolation** | ✅ Network and service isolation | ❌ Single container |
-| **Monitoring** | ✅ Per-service monitoring | ⚠️ Monolithic monitoring |
+- Operating system and version
+- System specifications (RAM, CPU, disk)
+- Installation method used
+- Output of `systemctl status kasm empire`
+- Output of `docker compose ps`
+- Relevant log output
 
 ## 📋 License
 
@@ -525,16 +453,26 @@ See the [LICENSE](LICENSE) file for details.
 
 **Built for security professionals, by security professionals** 🔴
 
-### Migration Guide
-If migrating from single-container to multi-container:
-```bash
-# Stop single container
-cd legacy
-./build-single-image.sh stop
+### Quick Reference Commands
 
-# Start multi-container
-cd ..
-./build.sh start
+#### Installation:
+```bash
+sudo ./fresh-rtpi-pen.sh       # Fresh installation
+sudo ./build.sh --slug myorg --enable-ssl  # Advanced with SSL
 ```
 
-**Note**: Data migration between deployments requires manual export/import of volumes.
+#### Management:
+```bash
+systemctl status kasm empire   # Check native services
+docker compose ps              # Check containers
+docker compose logs -f         # View all logs
+```
+
+#### Monitoring:
+```bash
+curl http://localhost:8888/health     # Self-healing status
+curl -k https://localhost:8443/api/public/get_token  # Kasm status
+curl http://localhost:1337/api/v2/admin/users        # Empire status
+```
+
+**For detailed configuration and troubleshooting, refer to the sections above.**

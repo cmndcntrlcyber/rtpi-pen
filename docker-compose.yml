@@ -9,21 +9,19 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.28.0.0/16
   rtpi_backend:
     driver: bridge
     internal: true
     ipam:
       config:
-        - subnet: 172.21.0.0/16
+        - subnet: 172.29.0.0/16
   rtpi_database:
     driver: bridge
     internal: true
     ipam:
       config:
-        - subnet: 172.22.0.0/16
-  kasm_default_network:
-    driver: bridge
+        - subnet: 172.30.0.0/16
   sysreptor_default:
     driver: bridge
 
@@ -37,22 +35,81 @@ volumes:
     driver: local
   rtpi_tools_data:
     driver: local
+  rtpi_healer_data:
+    driver: local
   
   # Application Service Volumes
   sysreptor-app-data:
     driver: local
-  sysreptor-db-data:
-    driver: local
   sysreptor-caddy-data:
-    driver: local
-  kasm_db_1.15.0:
-    driver: local
-  empire_data:
     driver: local
   registry_data:
     driver: local
 
 services:
+  # =============================================================================
+  # SELF-HEALING INFRASTRUCTURE
+  # =============================================================================
+
+  rtpi-healer:
+    build:
+      context: ./services/rtpi-healer
+      dockerfile: Dockerfile
+    image: rtpi-pen/healer:latest
+    container_name: rtpi-healer
+    restart: unless-stopped
+    user: root  # Run as root for Docker socket access
+    privileged: true  # Grant full Docker access
+    networks:
+      - rtpi_frontend
+      - rtpi_backend
+      - rtpi_database
+    ports:
+      - "8888:8888"  # Health monitoring API
+    volumes:
+      - rtpi_healer_data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:rw
+      - /opt:/opt
+      - ./:/home/cmndcntrl/rtpi-pen:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    depends_on:
+      - rtpi-database
+      - rtpi-cache
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # System initialization service
+  rtpi-init:
+    build:
+      context: ./services/rtpi-healer
+      dockerfile: Dockerfile
+    image: rtpi-pen/healer:latest
+    container_name: rtpi-init
+    restart: "no"
+    networks:
+      - rtpi_backend
+    volumes:
+      - /opt:/opt
+      - ./:/home/cmndcntrl/rtpi-pen:ro
+    command: ["/bin/bash", "/opt/rtpi-healer/scripts/init-system.sh"]
+    user: root
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # =============================================================================
   # CORE INFRASTRUCTURE SERVICES
   # =============================================================================
@@ -169,6 +226,8 @@ services:
     ports:
       - "80:80"   # HTTP (redirects to HTTPS)
       - "443:443" # HTTPS (main interface)
+    volumes:
+      - /opt/rtpi-pen/certs:/opt/rtpi-pen/certs:ro
     depends_on:
       - rtpi-orchestrator
     healthcheck:
@@ -183,182 +242,11 @@ services:
         max-file: "3"
 
   # =============================================================================
-  # KASM WORKSPACES STACK
+  # KASM WORKSPACES INTEGRATION
   # =============================================================================
-
-  kasm_db:
-    container_name: kasm_db
-    image: postgres:${POSTGRES_VERSION_KASM:-12-alpine}
-    healthcheck:
-      test: "pg_isready --username=${POSTGRES_USER_KASM:-kasmapp} && cat /proc/1/cmdline | grep -q '^postgres'"
-      timeout: 5s
-      retries: 20
-    networks:
-      - kasm_default_network
-      - rtpi_backend
-    environment:
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD_KASM:-SjenXuTppFFSWIIKjaAJ}"
-      POSTGRES_USER: ${POSTGRES_USER_KASM:-kasmapp}
-      POSTGRES_DB: ${POSTGRES_DB_KASM:-kasm}
-    volumes:
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/data.sql:/docker-entrypoint-initdb.d/data.sql
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/pg_hba.conf:/var/lib/postgresql/conf/pg_hba.conf
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/postgresql.conf:/var/lib/postgresql/conf/postgresql.conf
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/database/:/tmp/
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/db_server.crt:/etc/ssl/certs/db_server.crt
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/db_server.key:/etc/ssl/certs/db_server.key
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/log/postgres/:/var/log/postgres/
-      - kasm_db_1.15.0:/var/lib/postgresql/data
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    command: postgres -c ssl=on -c ssl_cert_file=/etc/ssl/certs/db_server.crt -c ssl_key_file=/etc/ssl/certs/db_server.key -c config_file=/var/lib/postgresql/conf/postgresql.conf -c hba_file=/var/lib/postgresql/conf/pg_hba.conf
-    restart: "always"
-
-  kasm_redis:
-    container_name: kasm_redis
-    command: ["sh", "-c", "redis-server --requirepass $${REDIS_PASSWORD}"]
-    user: "${KASM_UID:-1000}:${KASM_GID:-1000}"
-    image: redis:${REDIS_KASM_VERSION:-5-alpine}
-    networks:
-      - kasm_default_network
-      - rtpi_backend
-    environment:
-      REDIS_PASSWORD: "CwoZWGpBk5PZ3zD79fIK"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    restart: "always"
-
-  kasm_api:
-    container_name: kasm_api
-    user: "${KASM_UID:-1000}:${KASM_GID:-1000}"
-    image: "kasmweb/api:${KASM_VERSION:-1.15.0}"
-    read_only: true
-    networks:
-      - kasm_default_network
-      - rtpi_backend
-    volumes:
-      - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/tmp/api:/tmp
-    depends_on:
-      - kasm_db
-    restart: always
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  kasm_manager:
-    container_name: kasm_manager
-    user: "${KASM_UID:-1000}:${KASM_GID:-1000}"
-    image: "kasmweb/manager:${KASM_VERSION:-1.15.0}"
-    read_only: true
-    networks:
-      - kasm_default_network
-      - rtpi_backend
-    volumes:
-      - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
-    depends_on:
-      - kasm_db
-    restart: always
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  kasm_agent:
-    container_name: kasm_agent
-    user: root
-    image: "kasmweb/agent:${KASM_VERSION:-1.15.0}"
-    read_only: true
-    networks:
-      - kasm_default_network
-      - rtpi_backend
-    volumes:
-      - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
-      - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/nginx:/etc/nginx/conf.d
-    depends_on:
-      - kasm_manager
-    restart: always
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  kasm_share:
-    container_name: kasm_share
-    user: root
-    image: "kasmweb/share:${KASM_VERSION:-1.15.0}"
-    read_only: true
-    networks:
-      - kasm_default_network
-      - rtpi_backend
-    volumes:
-      - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
-    restart: always
-    depends_on:
-      - kasm_db
-      - kasm_redis
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  kasm_guac:
-    container_name: kasm_guac
-    user: "${KASM_UID:-1000}:${KASM_GID:-1000}"
-    image: "kasmweb/kasm-guac:${KASM_VERSION:-1.15.0}"
-    read_only: true
-    networks:
-      - kasm_default_network
-      - rtpi_backend
-    volumes:
-      - /opt/kasm/${KASM_VERSION:-1.15.0}:/opt/kasm/current
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/tmp/guac:/tmp
-    restart: always
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  kasm_proxy:
-    container_name: kasm_proxy
-    image: "kasmweb/nginx:${NGINX_VERSION:-1.25.3}"
-    ports:
-      - "8443:443" # HTTPS port for Kasm proxy (external access)
-    networks:
-      - kasm_default_network
-      - rtpi_frontend
-    volumes:
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/conf/nginx:/etc/nginx/conf.d:ro
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/kasm_nginx.key:/etc/ssl/private/kasm_nginx.key
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/certs/kasm_nginx.crt:/etc/ssl/certs/kasm_nginx.crt
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/www:/srv/www:ro
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/log/nginx:/var/log/external/nginx/
-      - /opt/kasm/${KASM_VERSION:-1.15.0}/log/logrotate:/var/log/external/logrotate/
-    depends_on:
-      - kasm_manager
-      - kasm_api
-      - kasm_agent
-      - kasm_share
-      - kasm_guac
-    restart: always
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+  # Note: Kasm is installed natively via fresh-rtpi-pen.sh
+  # Native Kasm installation runs on https://localhost:8443
+  # This section is reserved for future Kasm integration services if needed
 
   # =============================================================================
   # SYSREPTOR STACK
@@ -371,6 +259,7 @@ services:
     networks:
       - sysreptor_default
       - rtpi_backend
+      - rtpi_database
     ports:
       - "9000:8000"  # External access to SysReptor
     healthcheck:
@@ -381,7 +270,7 @@ services:
     volumes:
       - sysreptor-app-data:/app/data
     depends_on:
-      - sysreptor-db
+      - rtpi-database
       - sysreptor-redis
     command: /bin/bash /app/api/start.sh
     env_file:
@@ -411,29 +300,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  sysreptor-db:
-    image: postgres:14
-    container_name: sysreptor-db
-    restart: unless-stopped
-    networks:
-      - sysreptor_default
-      - rtpi_database
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    volumes:
-      - sysreptor-db-data:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_PASSWORD=sysreptorpassword
-      - POSTGRES_USER=sysreptor
-      - POSTGRES_DB=sysreptor
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   sysreptor-redis:
     image: bitnami/redis:7.2
@@ -453,25 +319,9 @@ services:
   # =============================================================================
   # SECURITY SERVICES
   # =============================================================================
-
-  ps-empire:
-    image: bcsecurity/empire:latest
-    container_name: ps-empire
-    restart: unless-stopped
-    networks:
-      - rtpi_backend
-      - rtpi_frontend
-    ports:
-      - "1337:1337"  # Empire C2 (external access)
-      - "5000:5000"   # Empire REST API (external access)
-    volumes:
-      - empire_data:/empire
-    command: ./ps-empire server
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+  # Note: Empire C2 is installed natively via fresh-rtpi-pen.sh
+  # Native Empire installation runs on http://localhost:1337
+  # This section is reserved for future containerized security services if needed
 
   # =============================================================================
   # UTILITY SERVICES

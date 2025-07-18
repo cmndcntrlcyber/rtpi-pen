@@ -1,0 +1,459 @@
+# =============================================================================
+# RTPI-PEN Red Team Infrastructure .gitignore
+# =============================================================================
+
+# =============================================================================
+# ENVIRONMENT & SECRETS
+# =============================================================================
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+.env.development
+.env.test
+.env.backup
+.env.override
+
+# Configuration files with secrets
+configs/rtpi-sysreptor/app.env
+configs/rtpi-sysreptor/.env
+configs/rtpi-kasm/.env
+configs/rtpi-empire/.env
+configs/passwords.conf
+configs/secrets.conf
+configs/credentials.conf
+
+# API keys and tokens
+api-keys.json
+tokens.json
+credentials.json
+auth-tokens.conf
+
+# =============================================================================
+# DOCKER & CONTAINERS
+# =============================================================================
+
+# Docker volume data
+docker-volumes/
+volumes/
+data/
+**/data/
+
+# Docker build cache
+.docker/
+docker-cache/
+buildx-cache/
+
+# Docker logs
+logs/
+*.log
+**/logs/
+docker-logs/
+
+# Docker compose overrides
+docker-compose.override.yml
+docker-compose.local.yml
+docker-compose.dev.yml
+docker-compose.prod.yml
+
+# Docker registry data
+registry-data/
+
+# =============================================================================
+# DATABASE FILES
+# =============================================================================
+
+# PostgreSQL data
+postgresql/
+postgres-data/
+pgdata/
+**/postgresql/data/
+**/postgres/data/
+
+# Database backups
+*.sql.gz
+*.sql.bz2
+*.dump
+*.backup
+db-backups/
+database-backups/
+backups/
+
+# Redis data
+redis-data/
+**/redis/data/
+dump.rdb
+appendonly.aof
+
+# =============================================================================
+# CERTIFICATES & KEYS
+# =============================================================================
+
+# SSL/TLS certificates
+*.crt
+*.cert
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+
+# Certificate directories
+certs/
+certificates/
+ssl/
+tls/
+pki/
+
+# CA and certificate authorities
+ca/
+ca-certificates/
+root-ca/
+
+# Let's Encrypt certificates
+letsencrypt/
+certbot/
+setup/.cloudflare_certs.sh
+
+# =============================================================================
+# KASM WORKSPACE FILES
+# =============================================================================
+
+# Kasm data directories
+/opt/kasm/
+kasm-data/
+kasm-volumes/
+kasm-logs/
+kasm-backups/
+
+# Kasm configuration overrides
+kasm-config/
+kasm-custom/
+
+# =============================================================================
+# SYSREPTOR FILES
+# =============================================================================
+
+# SysReptor data
+sysreptor-data/
+sysreptor-volumes/
+sysreptor-media/
+sysreptor-uploads/
+
+# SysReptor backups
+sysreptor-backups/
+sysreptor-exports/
+
+# =============================================================================
+# EMPIRE C2 FILES
+# =============================================================================
+
+# Empire data
+empire-data/
+empire-logs/
+empire-modules/
+empire-downloads/
+
+# Empire configuration
+empire-config/
+empire-ssl/
+
+# =============================================================================
+# LOGS & MONITORING
+# =============================================================================
+
+# Application logs
+*.log
+*.log.*
+*.out
+*.err
+logs/
+log/
+**/logs/
+**/log/
+
+# System logs
+syslog
+auth.log
+error.log
+access.log
+
+# Monitoring data
+metrics/
+monitoring/
+prometheus/
+grafana/
+
+# =============================================================================
+# CACHE & TEMPORARY FILES
+# =============================================================================
+
+# Cache directories
+cache/
+**/cache/
+.cache/
+tmp/
+temp/
+**/tmp/
+**/temp/
+
+# Runtime files
+*.pid
+*.sock
+*.socket
+run/
+**/run/
+
+# =============================================================================
+# BACKUP FILES
+# =============================================================================
+
+# General backups
+*.backup
+*.bak
+*.old
+*.orig
+*~
+*.swp
+*.swo
+
+# Configuration backups
+*.conf.bak
+*.yaml.bak
+*.yml.bak
+*.json.bak
+
+# =============================================================================
+# IDE & EDITOR FILES
+# =============================================================================
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.vimrc.local
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# =============================================================================
+# OPERATING SYSTEM FILES
+# =============================================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# =============================================================================
+# LANGUAGE-SPECIFIC FILES
+# =============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.npm
+.eslintcache
+.node_repl_history
+*.tgz
+*.tar.gz
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# =============================================================================
+# SECURITY & PENETRATION TESTING
+# =============================================================================
+
+# Penetration testing results
+results/
+reports/
+screenshots/
+evidence/
+loot/
+captures/
+
+# Tool outputs
+nmap-results/
+burp-results/
+metasploit-logs/
+empire-logs/
+cobalt-strike/
+
+# Wordlists and dictionaries
+wordlists/
+dictionaries/
+*.txt.gz
+
+# Hash files
+*.hash
+*.ntds
+*.sam
+hashes/
+
+# =============================================================================
+# NETWORK & INFRASTRUCTURE
+# =============================================================================
+
+# Network captures
+*.pcap
+*.pcapng
+*.cap
+captures/
+
+# VPN configurations
+*.ovpn
+*.p12
+vpn-configs/
+
+# SSH keys
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.pem
+ssh-keys/
+
+# =============================================================================
+# DEVELOPMENT & TESTING
+# =============================================================================
+
+# Test results
+test-results/
+coverage/
+.coverage
+.nyc_output
+.pytest_cache/
+
+# Development overrides
+local/
+local-config/
+dev-config/
+override/
+
+# Build artifacts
+build/
+dist/
+out/
+
+# =============================================================================
+# CUSTOM EXCLUSIONS
+# =============================================================================
+
+# Add project-specific exclusions here
+# Example:
+# custom-tools/
+# private-configs/
+# local-overrides/
+
+# RTPI-PEN Specific Ignores
+# Prevent redundant files
+*-compose.yaml
+*-compose.yml
+docker compose -f docker-compose.yml upcompose.yml
+*-kasm-first*
+*-working*
+*-old*
+*-backup*
+*-temp*
+build-info.txt
+.env.local
+.env.backup
+configs/certs/*.pem
+configs/certs/*.key
+configs/certs/*.crt
+*.log
+*.pid
+.DS_Store
+Thumbs.db

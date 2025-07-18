@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y \
     mingw-w64 wine wireshark python3-impacket \
     nbtscan smbclient net-tools \
     # Development tools
-    python3 python3-pip python3-venv python-is-python3 jython \
+    python3 python3-pip python3-venv python-is-python3 jython pipx \
     default-jdk golang-go \
     # SSL/TLS tools
     certbot \
