@@ -217,11 +217,8 @@ start_phase3_applications() {
         handle_startup_failure "kasm_proxy" "Phase 3 - Kasm Proxy"
     fi
     
-    # Start Empire
-    echo "👑 Starting Empire..."
-    if ! start_and_wait "ps-empire" 120; then
-        handle_startup_failure "ps-empire" "Phase 3 - Empire"
-    fi
+    # Empire C2 runs natively - no container startup needed
+    echo "👑 Empire C2 running natively at http://localhost:1337"
     
     # Start orchestrator
     echo "🎛️ Starting orchestrator..."
@@ -276,7 +273,6 @@ verify_all_services() {
         "kasm_proxy"
         "sysreptor-app"
         "sysreptor-redis"
-        "ps-empire"
         "rtpi-orchestrator"
     )
     

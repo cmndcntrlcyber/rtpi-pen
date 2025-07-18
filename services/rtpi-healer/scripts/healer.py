@@ -85,17 +85,10 @@ class RTHealerService:
         self.healing_actions = 0
         self.last_check_time = datetime.now()
         
-        # Container-specific healing strategies
+        # Container-specific healing strategies (containerized services only)
         self.healing_strategies = {
-            'kasm_guac': self._heal_kasm_guac,
-            'kasm_agent': self._heal_kasm_agent,
-            'kasm_db': self._heal_kasm_db,
             'sysreptor-app': self._heal_sysreptor_app,
             'rtpi-orchestrator': self._heal_rtpi_orchestrator,
-            'ps-empire': self._heal_ps_empire,
-            'kasm_api': self._heal_kasm_api,
-            'kasm_manager': self._heal_kasm_manager,
-            'kasm_share': self._heal_kasm_share,
         }
     
     def _execute_command(self, command: str, timeout: int = 30) -> Tuple[bool, str]:
@@ -317,19 +310,6 @@ password_encryption = md5
         logger.info("rtpi-orchestrator healing completed")
         return True
     
-    def _heal_ps_empire(self, container) -> bool:
-        """Heal ps-empire container - general issues"""
-        logger.info("Healing ps-empire container...")
-        
-        # Ensure empire data directory exists
-        empire_dir = "/opt/empire/data"
-        success, output = self._ensure_directory_permissions(empire_dir, 1000, 1000)
-        if not success:
-            logger.error(f"Failed to create empire directory: {output}")
-            return False
-        
-        return True
-    
     def _heal_kasm_api(self, container) -> bool:
         """Heal kasm_api container"""
         logger.info("Healing kasm_api container...")
@@ -370,7 +350,7 @@ password_encryption = md5
         return True
     
     def check_kasm_health(self) -> bool:
-        """Check Kasm Workspaces health - supports both native and containerized installations"""
+        """Check Kasm Workspaces health - Native installation only"""
         try:
             # Check if native Kasm installation is running
             if os.getenv('KASM_INSTALLED') == 'true':
@@ -390,9 +370,13 @@ password_encryption = md5
                                 return True
                         except requests.RequestException as e:
                             logger.warning(f"Kasm API check failed: {e}")
+                            # Try to restart Kasm service
+                            self._restart_native_kasm()
                             return False
                     else:
                         logger.warning(f"Native Kasm service is not active: {result.stdout.strip()}")
+                        # Try to restart Kasm service
+                        self._restart_native_kasm()
                         return False
                 except subprocess.TimeoutExpired:
                     logger.warning("Kasm systemctl check timed out")
@@ -401,36 +385,26 @@ password_encryption = md5
                     logger.warning(f"Error checking native Kasm service: {e}")
                     return False
             else:
-                # Check if Kasm containers are running (legacy mode)
-                kasm_containers = [
-                    'kasm_api', 'kasm_manager', 'kasm_agent', 
-                    'kasm_share', 'kasm_guac', 'kasm_proxy', 'kasm_redis'
-                ]
-                
-                for container_name in kasm_containers:
-                    try:
-                        container = self.docker_client.containers.get(container_name)
-                        if container.status != 'running':
-                            logger.warning(f"Kasm container {container_name} is not running: {container.status}")
-                            return False
-                    except docker.errors.NotFound:
-                        logger.warning(f"Kasm container {container_name} not found")
-                        return False
-                
-                # Check Kasm API endpoint
-                try:
-                    response = requests.get('https://localhost:8443/api/public/get_token', 
-                                          verify=False, timeout=10)
-                    if response.status_code == 200:
-                        logger.info("✅ Kasm Workspaces API is healthy")
-                        return True
-                except requests.RequestException as e:
-                    logger.warning(f"Kasm API check failed: {e}")
-                    return False
+                logger.info("Kasm not installed or running in legacy mode")
+                return True  # Don't fail if Kasm is not configured
                     
         except Exception as e:
             logger.error(f"Error checking Kasm health: {e}")
             return False
+    
+    def _restart_native_kasm(self):
+        """Restart native Kasm service"""
+        try:
+            logger.info("Attempting to restart native Kasm service...")
+            result = subprocess.run(['systemctl', 'restart', 'kasm'], 
+                                  capture_output=True, text=True, timeout=30)
+            if result.returncode == 0:
+                logger.info("✅ Native Kasm service restarted successfully")
+                time.sleep(10)  # Wait for service to stabilize
+            else:
+                logger.error(f"Failed to restart Kasm service: {result.stderr}")
+        except Exception as e:
+            logger.error(f"Error restarting native Kasm service: {e}")
     
     def _get_container_status(self, container_name: str) -> Dict:
         """Get detailed container status"""
@@ -561,7 +535,7 @@ password_encryption = md5
             
             # Backup critical configs
             configs_to_backup = [
-                "/opt/kasm/1.15.0/conf",
+                "/opt/kasm/1.17.0/conf",
                 "/home/cmndcntrl/rtpi-pen/configs",
                 "/home/cmndcntrl/rtpi-pen/docker-compose.yml"
             ]

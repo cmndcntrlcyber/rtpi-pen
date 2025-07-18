@@ -197,7 +197,8 @@ deploy_application_services() {
     
     # Start security services
     log "Starting security services..."
-    $DOCKER_COMPOSE_CMD up -d ps-empire
+    # Empire C2 runs natively - no container deployment needed
+    echo "✓ Empire C2 running natively at http://localhost:1337"
     
     # Start utility services
     log "Starting utility services..."

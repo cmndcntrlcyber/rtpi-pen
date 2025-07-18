@@ -1,4 +1,8 @@
 # with persistent storage
-docker pull bcsecurity/empire:latest
-docker create -v /empire --name data bcsecurity/empire:latest
-docker run -d -it -p 1337:1337 -p 5000:5000 --volumes-from data --name ps-empire bcsecurity/empire:latest
+cd /opt/
+git clone --recursive https://github.com/BC-SECURITY/Empire.git
+cd Empire/
+./setup/checkout-latest-tag.sh
+./ps-empire install -f -y 
+
+./ps-empire server

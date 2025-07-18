@@ -117,6 +117,7 @@ root-ca/
 # Let's Encrypt certificates
 letsencrypt/
 certbot/
+setup/.cloudflare_certs.sh
 
 # =============================================================================
 # KASM WORKSPACE FILES
@@ -435,3 +436,24 @@ out/
 # custom-tools/
 # private-configs/
 # local-overrides/
+
+# RTPI-PEN Specific Ignores
+# Prevent redundant files
+*-compose.yaml
+*-compose.yml
+docker compose -f docker-compose.yml upcompose.yml
+*-kasm-first*
+*-working*
+*-old*
+*-backup*
+*-temp*
+build-info.txt
+.env.local
+.env.backup
+configs/certs/*.pem
+configs/certs/*.key
+configs/certs/*.crt
+*.log
+*.pid
+.DS_Store
+Thumbs.db

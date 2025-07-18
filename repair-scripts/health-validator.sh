@@ -148,7 +148,6 @@ check_volume_mounts() {
         "kasm_db_1.15.0"
         "sysreptor-app-data"
         "sysreptor-db-data"
-        "empire_data"
     )
     
     for volume in "${critical_volumes[@]}"; do
@@ -282,7 +281,6 @@ perform_comprehensive_checks() {
         "sysreptor-db"
         "sysreptor-redis"
         "sysreptor-caddy"
-        "ps-empire"
         "rtpi-proxy"
         "rtpi-tools"
         "registry"

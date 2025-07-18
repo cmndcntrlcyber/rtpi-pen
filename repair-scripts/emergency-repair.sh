@@ -58,7 +58,6 @@ remove_failed_containers() {
     local problem_containers=(
         "kasm_agent"
         "rtpi-healer"
-        "ps-empire"
         "rtpi-orchestrator"
         "rtpi-init"
     )
@@ -173,7 +172,6 @@ prepare_for_restart() {
     # Ensure required directories exist
     local required_dirs=(
         "/opt/kasm/1.15.0"
-        "/opt/empire/data"
         "/opt/rtpi-orchestrator/data"
         "/var/log/rtpi-healer"
         "/data/rtpi-healer"
