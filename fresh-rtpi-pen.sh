@@ -62,7 +62,7 @@ echo "Removing conflicting packages..."
 for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
     sudo apt-get remove -y $pkg
 done
-sudo apt remove -y docker docker-engine docker.io containerd runc
+sudo apt remove -y docker docker-ce docker.io containerd runc
 
 # Add Docker's official GPG key
 echo "Adding Docker's official GPG key..."
@@ -175,7 +175,7 @@ fi
 
 echo "📊 Installing SysReptor..."
 echo "-------------------------------------"
-cd /home/cmndcntrl/rtpi-pen/configs/rtpi-sysreptor
+cd /opt/rtpi-pen/configs/rtpi-sysreptor
 if [ -f "install-sysreptor.sh" ]; then
     bash install-sysreptor.sh
 else

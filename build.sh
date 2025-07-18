@@ -104,27 +104,107 @@ parse_arguments() {
     fi
 }
 
-# Auto-detect server IP
+# Validate IPv4 address format
+is_valid_ipv4() {
+    local ip=$1
+    local regex='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+    
+    if [[ $ip =~ $regex ]]; then
+        # Check each octet is between 0-255
+        local IFS='.'
+        local -a octets=($ip)
+        for octet in "${octets[@]}"; do
+            if [[ $octet -lt 0 || $octet -gt 255 ]]; then
+                return 1
+            fi
+        done
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Auto-detect server IP (IPv4 only)
 detect_server_ip() {
     if [ -z "$SERVER_IP" ]; then
         log "Auto-detecting server IP address..."
         
-        # Try multiple methods to detect IP
-        SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ipinfo.io/ip 2>/dev/null || curl -s ipecho.net/plain 2>/dev/null || echo "")
+        # Try multiple methods to detect IPv4 address specifically
+        local detected_ip=""
         
+        # Method 1: Force IPv4 with curl -4 flag
+        detected_ip=$(curl -4 -s --connect-timeout 5 ifconfig.me 2>/dev/null || echo "")
+        if [ -n "$detected_ip" ] && is_valid_ipv4 "$detected_ip"; then
+            SERVER_IP="$detected_ip"
+        fi
+        
+        # Method 2: Try alternative IPv4 services
         if [ -z "$SERVER_IP" ]; then
-            # Fallback to local IP
-            SERVER_IP=$(hostname -I | awk '{print $1}')
+            detected_ip=$(curl -4 -s --connect-timeout 5 ipinfo.io/ip 2>/dev/null || echo "")
+            if [ -n "$detected_ip" ] && is_valid_ipv4 "$detected_ip"; then
+                SERVER_IP="$detected_ip"
+            fi
+        fi
+        
+        # Method 3: Try ipecho.net with IPv4 filter
+        if [ -z "$SERVER_IP" ]; then
+            detected_ip=$(curl -4 -s --connect-timeout 5 ipecho.net/plain 2>/dev/null || echo "")
+            if [ -n "$detected_ip" ] && is_valid_ipv4 "$detected_ip"; then
+                SERVER_IP="$detected_ip"
+            fi
+        fi
+        
+        # Method 4: Try ip4.me service
+        if [ -z "$SERVER_IP" ]; then
+            detected_ip=$(curl -s --connect-timeout 5 ip4.me 2>/dev/null | grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' | head -1 || echo "")
+            if [ -n "$detected_ip" ] && is_valid_ipv4 "$detected_ip"; then
+                SERVER_IP="$detected_ip"
+            fi
+        fi
+        
+        # Method 5: Fallback to local IPv4 address
+        if [ -z "$SERVER_IP" ]; then
+            # Get all IPs and filter for IPv4
+            local ips=$(hostname -I 2>/dev/null || echo "")
+            for ip in $ips; do
+                if is_valid_ipv4 "$ip" && [[ ! "$ip" =~ ^127\. ]] && [[ ! "$ip" =~ ^169\.254\. ]]; then
+                    SERVER_IP="$ip"
+                    break
+                fi
+            done
+        fi
+        
+        # Method 6: Try ip route method
+        if [ -z "$SERVER_IP" ]; then
+            detected_ip=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+' | head -1 || echo "")
+            if [ -n "$detected_ip" ] && is_valid_ipv4 "$detected_ip"; then
+                SERVER_IP="$detected_ip"
+            fi
         fi
         
         if [ -z "$SERVER_IP" ]; then
-            error "Unable to detect server IP address. Please provide --server-ip parameter"
+            error "Unable to detect IPv4 address. Please provide --server-ip parameter"
+            error "Note: DNS A records require IPv4 addresses, not IPv6"
+            exit 1
+        fi
+        
+        # Final validation
+        if ! is_valid_ipv4 "$SERVER_IP"; then
+            error "Detected IP address is not a valid IPv4 address: $SERVER_IP"
+            error "Please provide a valid IPv4 address with --server-ip parameter"
             exit 1
         fi
         
         log "Detected server IP: $SERVER_IP"
     else
         log "Using provided server IP: $SERVER_IP"
+        
+        # Validate provided IP
+        if ! is_valid_ipv4 "$SERVER_IP"; then
+            error "Provided IP address is not a valid IPv4 address: $SERVER_IP"
+            error "Please provide a valid IPv4 address"
+            exit 1
+        fi
     fi
 }
 

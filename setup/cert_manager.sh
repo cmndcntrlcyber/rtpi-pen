@@ -11,7 +11,7 @@ DOMAIN="attck-node.net"
 EMAIL="attck.community@gmail.com"
 CERT_DIR="/etc/letsencrypt"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DNS_MANAGER="$SCRIPT_DIR/cloudflare_dns_manager_working.sh"
+DNS_MANAGER="$SCRIPT_DIR/cloudflare_dns_manager.sh"
 
 # Colors for output
 RED='\033[0;31m'
