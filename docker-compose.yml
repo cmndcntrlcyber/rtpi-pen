@@ -45,6 +45,22 @@ volumes:
     driver: local
   registry_data:
     driver: local
+  
+  # Kasm and Security Service Volumes
+  vaultwarden_data:
+    driver: local
+  kasm_vscode_profiles:
+    driver: local
+  kasm_kali_home:
+    driver: local
+  kasm_kali_opt:
+    driver: local
+  kasm_kali_usr_local:
+    driver: local
+  kasm_kali_var_lib:
+    driver: local
+  kasm_kali_etc:
+    driver: local
 
 services:
   # =============================================================================
@@ -246,7 +262,76 @@ services:
   # =============================================================================
   # Note: Kasm is installed natively via fresh-rtpi-pen.sh
   # Native Kasm installation runs on https://localhost:8443
-  # This section is reserved for future Kasm integration services if needed
+  # Additional containerized Kasm services for specialized workspaces
+
+  kasm-vscode:
+    image: kasmweb/vs-code:1.16.1-rolling-daily
+    container_name: kasm-vscode
+    platform: linux/amd64
+    restart: "no"
+    networks:
+      - rtpi_frontend
+      - rtpi_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: "512m"
+    ports:
+      - "6901:6901"  # Kasm VS Code web interface
+    volumes:
+      - kasm_vscode_profiles:/home/kasm-user
+    environment:
+      - VNC_PW=password
+      - KASM_SVC_AUDIO=0
+      - KASM_SVC_GAMEPAD=0
+      - KASM_SVC_UPLOADS=1
+      - KASM_SVC_DOWNLOADS=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6901/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  kasm-kali:
+    image: kasmweb/kali-rolling-desktop:1.17.0-rolling-daily
+    container_name: kasm-kali
+    platform: linux/amd64
+    restart: unless-stopped
+    networks:
+      - rtpi_frontend
+      - rtpi_backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "6902:6901"  # Kasm Kali web interface
+    volumes:
+      - kasm_kali_home:/home/kasm-user
+      - kasm_kali_opt:/opt
+      - kasm_kali_usr_local:/usr/local
+      - kasm_kali_var_lib:/var/lib
+      - kasm_kali_etc:/etc
+    environment:
+      - VNC_PW=password
+      - KASM_SVC_AUDIO=1
+      - KASM_SVC_GAMEPAD=0
+      - KASM_SVC_UPLOADS=1
+      - KASM_SVC_DOWNLOADS=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6901/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # =============================================================================
   # SYSREPTOR STACK
@@ -321,7 +406,34 @@ services:
   # =============================================================================
   # Note: Empire C2 is installed natively via fresh-rtpi-pen.sh
   # Native Empire installation runs on http://localhost:1337
-  # This section is reserved for future containerized security services if needed
+
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: vaultwarden
+    platform: linux/amd64
+    restart: unless-stopped
+    networks:
+      - rtpi_frontend
+      - rtpi_backend
+    ports:
+      - "8080:80"  # Vaultwarden web interface
+    volumes:
+      - vaultwarden_data:/data
+    environment:
+      - WEBSOCKET_ENABLED=true
+      - SIGNUPS_ALLOWED=true
+      - ADMIN_TOKEN=your_admin_token_here
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/alive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # =============================================================================
   # UTILITY SERVICES
@@ -348,6 +460,7 @@ services:
     container_name: node-service
     restart: unless-stopped
     networks:
+      - rtpi_frontend
       - rtpi_backend
     ports:
       - "3500:3500"  # Node.js service (external access)
