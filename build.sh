@@ -23,6 +23,115 @@ SLUG=""
 ENABLE_SSL=false
 SERVER_IP=""
 
+# Kasm detection and cleanup functions
+check_kasm_status() {
+    log "Checking existing Kasm installation status..."
+    
+    # Check if native Kasm service exists and is active
+    local native_active=false
+    local native_runtime=0
+    
+    if systemctl is-active --quiet kasm 2>/dev/null; then
+        native_active=true
+        # Get service start time and calculate runtime
+        local start_time=$(systemctl show kasm --property=ActiveEnterTimestamp --value)
+        if [ -n "$start_time" ] && [ "$start_time" != "0" ]; then
+            local start_epoch=$(date -d "$start_time" +%s 2>/dev/null)
+            local current_epoch=$(date +%s)
+            native_runtime=$((current_epoch - start_epoch))
+        fi
+    fi
+    
+    # Check for containerized Kasm workspaces
+    local container_active=false
+    local container_runtime=0
+    
+    local kasm_containers=$(docker ps --filter "name=kasm" --format "{{.Names}}" 2>/dev/null)
+    if [ -n "$kasm_containers" ]; then
+        container_active=true
+        # Get oldest container start time
+        local oldest_start=$(docker ps --filter "name=kasm" --format "{{.CreatedAt}}" | sort | head -1)
+        if [ -n "$oldest_start" ]; then
+            local start_epoch=$(date -d "$oldest_start" +%s 2>/dev/null)
+            local current_epoch=$(date +%s)
+            container_runtime=$((current_epoch - start_epoch))
+        fi
+    fi
+    
+    # Check API accessibility
+    local api_accessible=false
+    if curl -k -s --connect-timeout 5 https://localhost:8443/api/public/get_token | grep -q "token" 2>/dev/null; then
+        api_accessible=true
+    fi
+    
+    # Determine status
+    local max_runtime=$((native_runtime > container_runtime ? native_runtime : container_runtime))
+    local min_runtime_threshold=600  # 10 minutes in seconds
+    
+    if ($native_active || $container_active) && $api_accessible && [ $max_runtime -gt $min_runtime_threshold ]; then
+        echo "WORKING"
+    elif $native_active || $container_active || [ -d "/opt/kasm" ] || [ -n "$(docker images --filter 'reference=kasm*' -q 2>/dev/null)" ]; then
+        echo "BROKEN"
+    else
+        echo "ABSENT"
+    fi
+}
+
+cleanup_broken_kasm() {
+    log "Cleaning up broken Kasm installation..."
+    
+    # Stop native Kasm service if running
+    if systemctl is-active --quiet kasm 2>/dev/null; then
+        log "Stopping native Kasm service..."
+        systemctl stop kasm || true
+        systemctl disable kasm || true
+    fi
+    
+    # Remove Kasm containers
+    log "Removing Kasm containers..."
+    local kasm_containers=$(docker ps -aq --filter "name=kasm" 2>/dev/null)
+    if [ -n "$kasm_containers" ]; then
+        docker rm -f $kasm_containers || true
+    fi
+    
+    # Remove Kasm images
+    log "Removing Kasm images..."
+    local kasm_images=$(docker images --filter "reference=kasm*" -q 2>/dev/null)
+    if [ -n "$kasm_images" ]; then
+        docker rmi -f $kasm_images || true
+    fi
+    
+    # Remove Kasm networks
+    log "Removing Kasm networks..."
+    local kasm_networks=$(docker network ls --filter "name=kasm" -q 2>/dev/null)
+    if [ -n "$kasm_networks" ]; then
+        docker network rm $kasm_networks || true
+    fi
+    
+    # Remove Kasm volumes
+    log "Removing Kasm volumes..."
+    local kasm_volumes=$(docker volume ls --filter "name=kasm" -q 2>/dev/null)
+    if [ -n "$kasm_volumes" ]; then
+        docker volume rm $kasm_volumes || true
+    fi
+    
+    # Clean up Kasm directories
+    log "Cleaning up Kasm directories..."
+    if [ -d "/opt/kasm" ]; then
+        rm -rf /opt/kasm || true
+    fi
+    
+    # Remove any kasm-related systemd services
+    if [ -f "/etc/systemd/system/kasm.service" ]; then
+        rm -f /etc/systemd/system/kasm.service || true
+    fi
+    
+    # Reload systemd
+    systemctl daemon-reload || true
+    
+    log "Kasm cleanup completed"
+}
+
 # Logging function
 log() {
     echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
@@ -521,8 +630,34 @@ main() {
     
     # Phase 1: Fresh system setup (native Kasm + system tools)
     log "Phase 1: Fresh System Setup"
+    
+    # Check existing Kasm installation before proceeding
+    kasm_status=$(check_kasm_status)
+    case $kasm_status in
+        "WORKING")
+            log "✅ Kasm is already installed and working (>10 min), skipping Kasm installation"
+            export SKIP_KASM_INSTALLATION=true
+            ;;
+        "BROKEN")
+            log "🔧 Kasm detected but not working properly, cleaning up..."
+            cleanup_broken_kasm
+            log "🚀 Proceeding with fresh Kasm installation..."
+            export SKIP_KASM_INSTALLATION=false
+            ;;
+        "ABSENT")
+            log "📦 No Kasm installation detected, proceeding with installation..."
+            export SKIP_KASM_INSTALLATION=false
+            ;;
+    esac
+    
     run_fresh_setup
-    wait_for_system
+    
+    # Only wait for system if we didn't skip Kasm installation
+    if [ "$SKIP_KASM_INSTALLATION" != "true" ]; then
+        wait_for_system
+    else
+        log "Skipping system wait since Kasm was already running"
+    fi
     
     # Phase 2: Containerized services
     log "Phase 2: Containerized Services"
