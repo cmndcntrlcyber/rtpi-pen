@@ -125,6 +125,160 @@ cleanup_broken_kasm() {
     log "Kasm cleanup completed"
 }
 
+# Portainer detection and cleanup functions
+check_portainer_status() {
+    log "Checking existing Portainer installation status..."
+    
+    # Check for Portainer container
+    local container_active=false
+    local container_runtime=0
+    
+    if docker ps --filter "name=portainer" --format "{{.Names}}" | grep -q "portainer" 2>/dev/null; then
+        container_active=true
+        # Get container start time
+        local start_time=$(docker inspect --format='{{.State.StartedAt}}' portainer 2>/dev/null)
+        if [ -n "$start_time" ]; then
+            local start_epoch=$(date -d "$start_time" +%s 2>/dev/null)
+            local current_epoch=$(date +%s)
+            container_runtime=$((current_epoch - start_epoch))
+        fi
+    fi
+    
+    # Check API accessibility
+    local api_accessible=false
+    if curl -s --connect-timeout 5 http://localhost:9443 | grep -q "Portainer" 2>/dev/null; then
+        api_accessible=true
+    fi
+    
+    # Determine status
+    local min_runtime_threshold=600  # 10 minutes in seconds
+    
+    if $container_active && $api_accessible && [ $container_runtime -gt $min_runtime_threshold ]; then
+        echo "WORKING"
+    elif $container_active || docker ps -a --filter "name=portainer" --format "{{.Names}}" | grep -q "portainer" 2>/dev/null; then
+        echo "BROKEN"
+    else
+        echo "ABSENT"
+    fi
+}
+
+cleanup_broken_portainer() {
+    log "Cleaning up broken Portainer installation..."
+    
+    # Remove Portainer container
+    local portainer_container=$(docker ps -aq --filter "name=portainer" 2>/dev/null)
+    if [ -n "$portainer_container" ]; then
+        docker rm -f $portainer_container || true
+        log "Removed Portainer container"
+    fi
+    
+    # Remove Portainer volumes
+    local portainer_volumes=$(docker volume ls --filter "name=portainer" -q 2>/dev/null)
+    if [ -n "$portainer_volumes" ]; then
+        docker volume rm $portainer_volumes || true
+        log "Removed Portainer volumes"
+    fi
+    
+    log "Portainer cleanup completed"
+}
+
+# Security services detection and cleanup functions
+check_security_services_status() {
+    log "Checking existing security services installation status..."
+    
+    # Check Vaultwarden
+    local vaultwarden_active=false
+    local vaultwarden_runtime=0
+    
+    if docker ps --filter "name=vaultwarden" --format "{{.Names}}" | grep -q "vaultwarden" 2>/dev/null; then
+        vaultwarden_active=true
+        local start_time=$(docker inspect --format='{{.State.StartedAt}}' vaultwarden 2>/dev/null)
+        if [ -n "$start_time" ]; then
+            local start_epoch=$(date -d "$start_time" +%s 2>/dev/null)
+            local current_epoch=$(date +%s)
+            vaultwarden_runtime=$((current_epoch - start_epoch))
+        fi
+    fi
+    
+    # Check Empire C2 (native service)
+    local empire_active=false
+    local empire_runtime=0
+    
+    if systemctl is-active --quiet empire 2>/dev/null; then
+        empire_active=true
+        local start_time=$(systemctl show empire --property=ActiveEnterTimestamp --value)
+        if [ -n "$start_time" ] && [ "$start_time" != "0" ]; then
+            local start_epoch=$(date -d "$start_time" +%s 2>/dev/null)
+            local current_epoch=$(date +%s)
+            empire_runtime=$((current_epoch - start_epoch))
+        fi
+    fi
+    
+    # Check API accessibility
+    local vaultwarden_api_accessible=false
+    local empire_api_accessible=false
+    
+    if curl -s --connect-timeout 5 http://localhost:8080/alive 2>/dev/null; then
+        vaultwarden_api_accessible=true
+    fi
+    
+    if curl -s --connect-timeout 5 http://localhost:1337 2>/dev/null; then
+        empire_api_accessible=true
+    fi
+    
+    # Determine status
+    local min_runtime_threshold=600  # 10 minutes in seconds
+    local max_runtime=$((vaultwarden_runtime > empire_runtime ? vaultwarden_runtime : empire_runtime))
+    
+    if ($vaultwarden_active || $empire_active) && ($vaultwarden_api_accessible || $empire_api_accessible) && [ $max_runtime -gt $min_runtime_threshold ]; then
+        echo "WORKING"
+    elif $vaultwarden_active || $empire_active || [ -d "/opt/Empire" ] || docker ps -a --filter "name=vaultwarden" --format "{{.Names}}" | grep -q "vaultwarden" 2>/dev/null; then
+        echo "BROKEN"
+    else
+        echo "ABSENT"
+    fi
+}
+
+cleanup_broken_security_services() {
+    log "Cleaning up broken security services..."
+    
+    # Stop Empire service if running
+    if systemctl is-active --quiet empire 2>/dev/null; then
+        log "Stopping Empire service..."
+        systemctl stop empire || true
+        systemctl disable empire || true
+    fi
+    
+    # Remove Vaultwarden container
+    local vaultwarden_container=$(docker ps -aq --filter "name=vaultwarden" 2>/dev/null)
+    if [ -n "$vaultwarden_container" ]; then
+        docker rm -f $vaultwarden_container || true
+        log "Removed Vaultwarden container"
+    fi
+    
+    # Remove Vaultwarden volumes
+    local vaultwarden_volumes=$(docker volume ls --filter "name=vaultwarden" -q 2>/dev/null)
+    if [ -n "$vaultwarden_volumes" ]; then
+        docker volume rm $vaultwarden_volumes || true
+        log "Removed Vaultwarden volumes"
+    fi
+    
+    # Clean up Empire directory
+    if [ -d "/opt/Empire" ]; then
+        rm -rf /opt/Empire || true
+        log "Removed Empire directory"
+    fi
+    
+    # Remove Empire systemd service
+    if [ -f "/etc/systemd/system/empire.service" ]; then
+        rm -f /etc/systemd/system/empire.service || true
+        systemctl daemon-reload || true
+        log "Removed Empire service"
+    fi
+    
+    log "Security services cleanup completed"
+}
+
 log_success() {
     echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] ✅ $1${NC}"
 }
@@ -328,10 +482,66 @@ deploy_application_services() {
     log "Starting SysReptor services..."
     $DOCKER_COMPOSE_CMD up -d sysreptor-app sysreptor-caddy
     
-    # Start security services
-    log "Starting security services..."
-    # Empire C2 runs natively - no container deployment needed
-    echo "✓ Empire C2 running natively at http://localhost:1337"
+    # Check existing security services installation before proceeding
+    security_services_status=$(check_security_services_status)
+    case $security_services_status in
+        "WORKING")
+            log_success "Security services are already installed and working (>10 min), skipping security services deployment"
+            export SKIP_SECURITY_SERVICES_DEPLOYMENT=true
+            ;;
+        "BROKEN")
+            log_warning "Security services detected but not working properly, cleaning up..."
+            cleanup_broken_security_services
+            log "Proceeding with fresh security services deployment..."
+            export SKIP_SECURITY_SERVICES_DEPLOYMENT=false
+            ;;
+        "ABSENT")
+            log "No security services installation detected, proceeding with deployment..."
+            export SKIP_SECURITY_SERVICES_DEPLOYMENT=false
+            ;;
+    esac
+    
+    # Only deploy security services if not skipped
+    if [ "$SKIP_SECURITY_SERVICES_DEPLOYMENT" != "true" ]; then
+        # Start security services
+        log "Starting security services..."
+        $DOCKER_COMPOSE_CMD up -d vaultwarden
+        
+        # Start additional Kasm workspaces
+        log "Starting additional Kasm workspaces..."
+        $DOCKER_COMPOSE_CMD up -d kasm-vscode kasm-kali
+        
+        # Empire C2 runs natively - no container deployment needed
+        echo "✓ Empire C2 running natively at http://localhost:1337"
+    else
+        log "Skipping security services deployment - already working"
+    fi
+    
+    # Check existing Portainer installation before proceeding
+    portainer_status=$(check_portainer_status)
+    case $portainer_status in
+        "WORKING")
+            log_success "Portainer is already installed and working (>10 min), skipping Portainer deployment"
+            export SKIP_PORTAINER_DEPLOYMENT=true
+            ;;
+        "BROKEN")
+            log_warning "Portainer detected but not working properly, cleaning up..."
+            cleanup_broken_portainer
+            log "Proceeding with fresh Portainer deployment..."
+            export SKIP_PORTAINER_DEPLOYMENT=false
+            ;;
+        "ABSENT")
+            log "No Portainer installation detected, proceeding with deployment..."
+            export SKIP_PORTAINER_DEPLOYMENT=false
+            ;;
+    esac
+    
+    # Note: Portainer is not in docker-compose.yml, it's installed natively
+    if [ "$SKIP_PORTAINER_DEPLOYMENT" != "true" ]; then
+        log "Portainer deployment managed outside of docker-compose"
+    else
+        log "Skipping Portainer deployment - already working"
+    fi
     
     # Start utility services
     log "Starting utility services..."
