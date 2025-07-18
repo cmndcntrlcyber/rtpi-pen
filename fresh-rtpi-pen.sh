@@ -178,7 +178,7 @@ cleanup_port_8443_conflicts() {
     if [ -f "/opt/rtpi-pen/docker-compose.yml" ]; then
         log "Stopping docker-compose services..."
         cd /opt/rtpi-pen
-        docker-compose down || true
+        docker compose down || true
         cd - > /dev/null
     fi
     
@@ -371,8 +371,101 @@ cleanup_broken_security_services() {
     log "Security services cleanup completed"
 }
 
+# APT cache repair and validation functions
+check_apt_health() {
+    log "Checking APT package system health..."
+    
+    # Check disk space first
+    local available_space=$(df /var/cache/apt/ | tail -1 | awk '{print $4}')
+    if [ "$available_space" -lt 1048576 ]; then  # Less than 1GB
+        warn "Low disk space in /var/cache/apt/: ${available_space}KB available"
+    fi
+    
+    # Test if APT is working
+    if ! apt-get check >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    # Test if we can read package lists
+    if ! apt-cache search test >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    return 0
+}
+
+repair_apt_cache() {
+    log "Repairing APT package cache..."
+    
+    # Clean existing cache
+    log "Cleaning APT cache..."
+    apt-get clean || true
+    apt-get autoclean || true
+    
+    # Remove corrupted cache files
+    log "Removing corrupted cache files..."
+    rm -rf /var/cache/apt/archives/partial/* || true
+    rm -rf /var/cache/apt/srcpkgcache.bin* || true
+    rm -rf /var/cache/apt/pkgcache.bin* || true
+    
+    # Fix permissions
+    log "Fixing APT cache permissions..."
+    chown -R root:root /var/cache/apt/ || true
+    chmod -R 755 /var/cache/apt/ || true
+    
+    # Nuclear option if needed - remove all package lists
+    if ! apt-get check >/dev/null 2>&1; then
+        log "Performing complete APT reset..."
+        rm -rf /var/lib/apt/lists/* || true
+        mkdir -p /var/lib/apt/lists/partial
+        chown -R root:root /var/lib/apt/lists/
+        chmod -R 755 /var/lib/apt/lists/
+    fi
+    
+    # Rebuild package cache
+    log "Rebuilding package database..."
+    apt-get update || {
+        error "Failed to update package database after repair"
+        return 1
+    }
+    
+    # Final health check
+    log "Verifying APT repair..."
+    if apt-get check && apt-cache search test >/dev/null 2>&1; then
+        log "✅ APT cache repair successful"
+        return 0
+    else
+        error "❌ APT cache repair failed"
+        return 1
+    fi
+}
+
+# Pre-installation APT health check and repair
+ensure_apt_health() {
+    log "Ensuring APT package system is healthy..."
+    
+    if check_apt_health; then
+        log "✅ APT system is healthy"
+        return 0
+    else
+        warn "⚠️  APT system issues detected, attempting repair..."
+        
+        if repair_apt_cache; then
+            log "✅ APT system repaired successfully"
+            return 0
+        else
+            error "❌ Unable to repair APT system"
+            error "Manual intervention may be required"
+            exit 1
+        fi
+    fi
+}
+
 # Basic system updates and essential packages
 echo "📦 Installing system packages..."
+
+# Ensure APT is healthy before proceeding
+ensure_apt_health
 apt-get update
 apt upgrade -y
 apt-get install -y jython
@@ -499,11 +592,8 @@ if [ "$SKIP_KASM_INSTALLATION" != "true" ]; then
     echo "Installing Kasm Workspaces..."
     tar -xf kasm_release_1.17.0.7f020d.tar.gz
     
-    # Set the environment variable to accept the EULA
-    ACCEPT_EULA=y
-    
     # Run the installation script with the necessary parameters
-    echo $ACCEPT_EULA | sudo bash -x kasm_release/install.sh -L 8443 \
+    sudo bash kasm_release/install.sh -L 8443 \
         --offline-workspaces /opt/kasm_release_workspace_images_amd64_1.17.0.7f020d.tar.gz \
         --offline-service /opt/kasm_release_service_images_amd64_1.17.0.7f020d.tar.gz \
         --offline-network-plugin /opt/kasm_release_plugin_images_amd64_1.17.0.7f020d.tar.gz
@@ -704,6 +794,29 @@ echo "KASM_INSTALLED=true" >> /etc/environment
 # Add current user to docker group
 usermod -aG docker $USER || true
 
+echo "🐳 Building and starting containerized services..."
+echo "-------------------------------------"
+cd /opt/rtpi-pen
+
+log "Building Docker images..."
+if docker compose build; then
+    log "✅ Docker images built successfully"
+else
+    error "❌ Failed to build Docker images"
+    exit 1
+fi
+
+log "Starting containerized services..."
+if docker compose up -d; then
+    log "✅ Containerized services started successfully"
+else
+    error "❌ Failed to start containerized services"
+    exit 1
+fi
+
+log "Waiting for services to stabilize..."
+sleep 30
+
 echo "📋 Installation Summary:"
 echo "-------------------------------------"
 echo "✅ System packages installed"
@@ -713,6 +826,7 @@ echo "✅ Portainer installed"
 echo "✅ SysReptor installation attempted"
 echo "✅ Empire C2 installation attempted"
 echo "✅ Environment variables configured"
+echo "✅ Containerized services built and started"
 echo ""
 echo "🌐 Access Points:"
 echo "• Kasm Workspaces: https://localhost:8443"
@@ -720,10 +834,11 @@ echo "• Portainer: https://localhost:9443"
 echo "• SysReptor: http://localhost:7777"
 echo "• Empire C2: http://localhost:1337"
 echo ""
-echo "📝 Next Steps:"
-echo "1. Run 'docker-compose up -d' to start containerized services"
-echo "2. Access services via the URLs above"
-echo "3. Check logs with 'docker-compose logs' if issues occur"
+echo "📝 Management Commands:"
+echo "• View logs: docker compose logs -f"
+echo "• Restart services: docker compose restart"
+echo "• Stop services: docker compose down"
+echo "• Service status: docker compose ps"
 echo ""
 echo "🏥 Self-healing service will monitor and repair services automatically"
 echo ""
