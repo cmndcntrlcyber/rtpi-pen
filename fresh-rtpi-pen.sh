@@ -142,6 +142,81 @@ cleanup_broken_kasm() {
     log "Kasm cleanup completed"
 }
 
+# Port conflict detection and cleanup functions
+check_port_8443_usage() {
+    log "Checking port 8443 usage..."
+    
+    # Get processes using port 8443
+    local port_users=$(lsof -Pi :8443 -sTCP:LISTEN 2>/dev/null || echo "")
+    
+    if [ -n "$port_users" ]; then
+        log "Port 8443 is in use:"
+        echo "$port_users"
+        return 1
+    else
+        log "Port 8443 is available"
+        return 0
+    fi
+}
+
+cleanup_port_8443_conflicts() {
+    log "Cleaning up port 8443 conflicts..."
+    
+    # Stop any Docker containers using port 8443
+    local containers_using_port=$(docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Ports}}" | grep ":8443" | awk '{print $1}' || echo "")
+    
+    if [ -n "$containers_using_port" ]; then
+        log "Stopping containers using port 8443..."
+        for container in $containers_using_port; do
+            log "Stopping container: $container"
+            docker stop "$container" || true
+            docker rm -f "$container" || true
+        done
+    fi
+    
+    # Stop docker-compose services that might be using port 8443
+    if [ -f "/opt/rtpi-pen/docker-compose.yml" ]; then
+        log "Stopping docker-compose services..."
+        cd /opt/rtpi-pen
+        docker-compose down || true
+        cd - > /dev/null
+    fi
+    
+    # Kill any remaining processes on port 8443
+    local port_pids=$(lsof -t -i:8443 2>/dev/null || echo "")
+    if [ -n "$port_pids" ]; then
+        log "Killing remaining processes on port 8443..."
+        for pid in $port_pids; do
+            kill -9 "$pid" 2>/dev/null || true
+        done
+    fi
+    
+    # Wait a moment for processes to cleanup
+    sleep 3
+    
+    # Verify port is now free
+    if check_port_8443_usage; then
+        log "Port 8443 successfully freed"
+        return 0
+    else
+        error "Failed to free port 8443"
+        return 1
+    fi
+}
+
+# Enhanced Kasm cleanup with port conflict resolution
+cleanup_broken_kasm_enhanced() {
+    log "Enhanced Kasm cleanup with port conflict resolution..."
+    
+    # First, cleanup port conflicts
+    cleanup_port_8443_conflicts
+    
+    # Then do the standard Kasm cleanup
+    cleanup_broken_kasm
+    
+    log "Enhanced Kasm cleanup completed"
+}
+
 # Portainer detection and cleanup functions
 check_portainer_status() {
     log "Checking existing Portainer installation status..."
@@ -394,12 +469,17 @@ case $kasm_status in
         ;;
     "BROKEN")
         log "🔧 Kasm detected but not working properly, cleaning up..."
-        cleanup_broken_kasm
+        cleanup_broken_kasm_enhanced
         log "🚀 Proceeding with fresh Kasm installation..."
         export SKIP_KASM_INSTALLATION=false
         ;;
     "ABSENT")
         log "📦 No Kasm installation detected, proceeding with installation..."
+        # Even for absent, check for port conflicts
+        if ! check_port_8443_usage; then
+            log "Port 8443 is in use, cleaning up conflicts..."
+            cleanup_port_8443_conflicts
+        fi
         export SKIP_KASM_INSTALLATION=false
         ;;
 esac
