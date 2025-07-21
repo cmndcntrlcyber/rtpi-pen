@@ -268,7 +268,7 @@ services:
     image: kasmweb/vs-code:1.17.0-rolling-daily
     container_name: kasm-vscode
     platform: linux/amd64
-    restart: "no"
+    restart: unless-stopped
     networks:
       - rtpi_frontend
       - rtpi_backend
@@ -279,12 +279,23 @@ services:
       - "6901:6901"  # Kasm VS Code web interface
     volumes:
       - kasm_vscode_profiles:/home/kasm-user
+      - ./configs/kasm-vscode-fix.sh:/dockerstartup/custom_startup.sh:ro
     environment:
       - VNC_PW=password
       - KASM_SVC_AUDIO=0
       - KASM_SVC_GAMEPAD=0
       - KASM_SVC_UPLOADS=1
       - KASM_SVC_DOWNLOADS=1
+      - SSL_ONLY=false
+      - KASM_SVC_SSL=0
+      - DISABLE_SSL=true
+      - KASM_SVC_ACCEPT_ALL_CONNECTIONS=1
+      - KASM_SVC_FORCE_HTTPS=0
+      - VNC_SSL_ONLY=false
+      - KASMVNC_SSL_ONLY=false
+      - NO_VNC_SSL=true
+      - NOVNC_SSL=false
+      - VNC_ENABLE_NOVNC_SSL=false
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:6901/"]
       interval: 30s

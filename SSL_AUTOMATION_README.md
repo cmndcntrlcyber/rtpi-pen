@@ -53,6 +53,9 @@ For slug `c3s`, the following domains are automatically created:
 Handles DNS record creation and ACME challenge management.
 
 ```bash
+# Validate Cloudflare configuration
+./setup/cloudflare_dns_manager.sh validate
+
 # Create DNS A records for services
 ./setup/cloudflare_dns_manager.sh create-records c3s 192.168.1.100
 
@@ -61,9 +64,6 @@ Handles DNS record creation and ACME challenge management.
 
 # Delete ACME challenge record
 ./setup/cloudflare_dns_manager.sh challenge delete c3s-reports
-
-# List DNS records
-./setup/cloudflare_dns_manager.sh challenge list c3s-reports
 ```
 
 ### 2. Certificate Manager (`setup/cert_manager.sh`)
@@ -112,12 +112,38 @@ sudo ./setup/cert_renewal.sh setup-cron
 
 ### Cloudflare Configuration
 
-The system uses hardcoded Cloudflare credentials in `setup/cloudflare_dns_manager.sh`:
+The system uses environment variables from the `.env` file for Cloudflare API authentication. You must configure these values before using SSL automation:
 
+**Required Environment Variables in `.env`:**
 ```bash
-CLOUDFLARE_API_TOKEN="<INSERT_HERE>"
-DOMAIN="attck-node.net"
-EMAIL="attck.community@gmail.com"
+CF_API_TOKEN="your_cloudflare_api_token_here"
+CF_DOMAIN="attck-node.net"
+CF_ZONE_ID="your_cloudflare_zone_id_here"
+CF_EMAIL="attck.community@gmail.com"
+```
+
+**Setup Instructions:**
+1. **Get Cloudflare API Token:**
+   - Log into Cloudflare Dashboard
+   - Go to "My Profile" → "API Tokens"
+   - Create token with `Zone:DNS:Edit` permissions for your domain
+
+2. **Get Zone ID:**
+   - Go to your domain in Cloudflare Dashboard
+   - Copy the Zone ID from the right sidebar
+
+3. **Update `.env` file:**
+   - Replace `CF_API_TOKEN` with your actual API token
+   - Replace `CF_ZONE_ID` with your actual zone ID
+   - Verify `CF_DOMAIN` and `CF_EMAIL` are correct
+
+**⚠️ Security Note:** The `.env` file is excluded from Git to protect your API credentials.
+
+**Environment Variable Loading:**
+When running SSL automation scripts, ensure environment variables are properly exported:
+```bash
+# Proper way to run SSL automation scripts
+cd /opt/rtpi-pen && set -a && source .env && set +a && setup/cloudflare_dns_manager.sh validate
 ```
 
 ### Service Configuration Updates
@@ -182,25 +208,37 @@ The system sets up automatic certificate renewal:
 
 ### Common Issues
 
-1. **DNS Propagation Delays**:
+1. **Environment Variable Loading Issues**:
+   ```bash
+   # Validate Cloudflare configuration
+   cd /opt/rtpi-pen && set -a && source .env && set +a && setup/cloudflare_dns_manager.sh validate
+   
+   # If validation fails, check .env file format
+   head -5 .env  # Should start with "# Docker Compose Environment Variables"
+   
+   # Test environment variable loading
+   source .env && echo "CF_API_TOKEN: '$CF_API_TOKEN'"
+   ```
+
+2. **DNS Propagation Delays**:
    ```bash
    # Check DNS propagation manually
    dig +short TXT _acme-challenge.c3s.attck-node.net @1.1.1.1
    ```
 
-2. **Certificate Validation Failures**:
+3. **Certificate Validation Failures**:
    ```bash
    # Validate certificate manually
    sudo ./setup/cert_manager.sh validate c3s
    ```
 
-3. **Service Configuration Issues**:
+4. **Service Configuration Issues**:
    ```bash
    # Check service logs
    docker-compose logs rtpi-proxy
    ```
 
-4. **Renewal Failures**:
+5. **Renewal Failures**:
    ```bash
    # Check renewal logs
    sudo tail -f /var/log/cert-renewal.log
@@ -220,6 +258,9 @@ nslookup c3s.attck-node.net
 
 # Check service health
 curl -k https://c3s.attck-node.net
+
+# Validate DNS manager configuration
+cd /opt/rtpi-pen && set -a && source .env && set +a && setup/cloudflare_dns_manager.sh validate
 ```
 
 ## Manual Certificate Management
@@ -324,10 +365,11 @@ For issues or questions:
 1. Check the logs in `/var/log/cert-renewal.log`
 2. Run diagnostic commands from the troubleshooting section
 3. Review the certificate status with `./setup/cert_renewal.sh status`
+4. Validate Cloudflare configuration with `./setup/cloudflare_dns_manager.sh validate`
 
 ## Version Information
 
-- **SSL Automation Version**: 1.0.0
+- **SSL Automation Version**: 1.1.0
 - **Build Script Version**: 1.18.0
 - **Compatible RTPI-PEN Version**: 1.17.0+
 
