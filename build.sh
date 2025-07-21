@@ -703,12 +703,77 @@ setup_ssl_certificates() {
     log "✅ SSL certificates generated and configured"
 }
 
+# Generate SysReptor configuration
+generate_sysreptor_config() {
+    log "Generating SysReptor configuration..."
+    
+    # Create the config directory if it doesn't exist
+    local config_dir="configs/rtpi-sysreptor"
+    mkdir -p "$config_dir"
+    
+    # Create app.env file
+    local app_env_file="$config_dir/app.env"
+    
+    # Generate SECRET_KEY
+    local secret_key=$(openssl rand -base64 64 | tr -d '\n=')
+    
+    # Generate ENCRYPTION_KEYS
+    local key_id=$(uuidgen)
+    local enc_key=$(openssl rand -base64 64 | tr -d '\n=')
+    
+    log "Creating SysReptor app.env configuration..."
+    
+    # Create app.env with all required configuration
+    cat > "$app_env_file" << EOF
+# SysReptor Configuration
+# Generated automatically by RTPI-PEN build process
+
+# Security Keys
+SECRET_KEY="$secret_key"
+
+# Database Configuration
+DATABASE_HOST=rtpi-database
+DATABASE_NAME=sysreptor
+DATABASE_USER=sysreptor
+DATABASE_PASSWORD=sysreptorpassword
+DATABASE_PORT=5432
+
+# Encryption Keys
+ENCRYPTION_KEYS=[{"id":"$key_id","key":"$enc_key"}]
+
+# Security and Access
+ALLOWED_HOSTS=sysreptor,sysreptor.local,sysreptor.rtpi.local,0.0.0.0,127.0.0.1,rtpi-reports,localhost,$slug-reports.attck-node.net
+SECURE_SSL_REDIRECT=off
+USE_X_FORWARDED_HOST=on
+DEBUG=off
+
+# Redis Configuration
+REDIS_HOST=sysreptor-redis
+REDIS_PORT=6379
+REDIS_INDEX=0
+REDIS_PASSWORD=sysreptorredispassword
+
+# Features and Plugins
+ENABLE_PRIVATE_DESIGNS=true
+DISABLE_WEBSOCKETS=true
+ENABLED_PLUGINS=cyberchef,graphqlvoyager,checkthehash
+EOF
+    
+    # Set proper permissions
+    chmod 644 "$app_env_file"
+    
+    if [ -f "$app_env_file" ]; then
+        log "✅ SysReptor configuration generated successfully"
+        return 0
+    else
+        error "❌ Failed to generate SysReptor configuration"
+        return 1
+    fi
+}
+
 # Update Docker Compose for SSL certificate mounting
 update_docker_compose_ssl() {
     log "Updating Docker Compose for SSL certificate mounting..."
-    
-    # Create backup of original docker-compose.yml
-    cp docker-compose.yml docker-compose.yml.backup
     
     # Add certificate volume mount to proxy service
     local cert_volume="      - /opt/rtpi-pen/certs/$SLUG:/opt/rtpi-pen/certs/$SLUG:ro"
@@ -895,6 +960,10 @@ main() {
     
     # Phase 2: Containerized services
     log "Phase 2: Containerized Services"
+    
+    # Generate SysReptor configuration before building containers
+    generate_sysreptor_config
+    
     start_containerized_services
     wait_for_services
     

@@ -365,34 +365,13 @@ services:
       retries: 3
     volumes:
       - sysreptor-app-data:/app/data
+      - ./configs/rtpi-sysreptor/app.env:/app/.env:ro
     depends_on:
       - rtpi-database
       - sysreptor-redis
     command: /bin/bash /app/api/start.sh
-    environment:
-      # Django Secret Key
-      - SECRET_KEY=aZgBbCmJjDdEeFfGhIiKkLlMnNpPqQrRsSvVwWxXyY0918QbX7fhdDr8fhOQAIj9zooqbEkfJJgaSSDVieRWSkQWlJMC55dnL21YzhrUb5gwU6
-      # Database Configuration (Django/SysReptor specific)
-      - DATABASE_HOST=rtpi-database
-      - DATABASE_NAME=sysreptor
-      - DATABASE_USER=sysreptor
-      - DATABASE_PASSWORD=sysreptorpassword
-      - DATABASE_PORT=5432
-      # Encryption (will be added from env file)
-      # Security and Access
-      - ALLOWED_HOSTS=demo-reports.attck-node.net,sysreptor,0.0.0.0,127.0.0.1,attck-node.net,rtpi-pen-dev
-      - SECURE_SSL_REDIRECT=on
-      - USE_X_FORWARDED_HOST=on
-      - DEBUG=off
-      # Redis Configuration
-      - REDIS_HOST=sysreptor-redis
-      - REDIS_PORT=6379
-      - REDIS_INDEX=0
-      - REDIS_PASSWORD=sysreptorredispassword
-      # Features and Plugins
-      - ENABLE_PRIVATE_DESIGNS=true
-      - DISABLE_WEBSOCKETS=true
-      - ENABLED_PLUGINS=cyberchef,graphqlvoyager,checkthehash
+    env_file:
+      - ./configs/rtpi-sysreptor/app.env
     logging:
       driver: "json-file"
       options:
