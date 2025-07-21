@@ -5,7 +5,7 @@
 # Version: 1.1.0
 
 # Configuration
-CLOUDFLARE_API_TOKEN="4qoVXUUTkPEI8Z1rzHxFoG-O1pGLzII7axQ4qWhP"
+CLOUDFLARE_API_TOKEN=$CF_RTPI_API
 DOMAIN="attck-node.net"
 ZONE_ID="c6cb338243aa906a3ac55b36b35f8b75"
 EMAIL="attck.community@gmail.com"
