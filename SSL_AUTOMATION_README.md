@@ -115,7 +115,7 @@ sudo ./setup/cert_renewal.sh setup-cron
 The system uses hardcoded Cloudflare credentials in `setup/cloudflare_dns_manager.sh`:
 
 ```bash
-CLOUDFLARE_API_TOKEN="4qoVXUUTkPEI8Z1rzHxFoG-O1pGLzII7axQ4qWhP"
+CLOUDFLARE_API_TOKEN="<INSERT_HERE>"
 DOMAIN="attck-node.net"
 EMAIL="attck.community@gmail.com"
 ```
