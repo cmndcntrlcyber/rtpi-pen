@@ -5,10 +5,10 @@
 # Version: 1.1.0
 
 # Configuration
-CLOUDFLARE_API_TOKEN=$CF_RTPI_API
-DOMAIN="attck-node.net"
-ZONE_ID="c6cb338243aa906a3ac55b36b35f8b75"
-EMAIL="attck.community@gmail.com"
+CLOUDFLARE_API_TOKEN=$CF_API_TOKEN
+DOMAIN=$CF_DOMAIN
+ZONE_ID=$CF_ZONE_ID
+EMAIL=$CF_EMAIL
 
 # Colors for output
 RED='\033[0;31m'
@@ -191,21 +191,74 @@ main() {
         "create-records")
             create_service_records "$@"
             ;;
+        "validate")
+            validate_config
+            ;;
         "test")
             log "Testing DNS manager..."
-            create_acme_record "test" "test_token_123"
+            validate_config && create_acme_record "test" "test_token_123"
             ;;
         *)
-            echo "Usage: $0 <challenge|create-records|test> [options]"
+            echo "Usage: $0 <challenge|create-records|validate|test> [options]"
             echo ""
             echo "Commands:"
             echo "  challenge create <subdomain> <token>  - Create ACME challenge record"
             echo "  challenge delete <subdomain>         - Delete ACME challenge record"
             echo "  create-records <slug> <server_ip>    - Create A records for services"
+            echo "  validate                             - Validate Cloudflare configuration"
             echo "  test                                 - Test DNS manager functionality"
             exit 1
             ;;
     esac
+}
+
+# Validate configuration
+validate_config() {
+    log "Validating Cloudflare configuration..."
+    
+    if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+        error "CF_API_TOKEN not set"
+        return 1
+    fi
+    
+    if [ -z "$DOMAIN" ]; then
+        error "CF_DOMAIN not set"
+        return 1
+    fi
+    
+    if [ -z "$ZONE_ID" ]; then
+        error "CF_ZONE_ID not set"
+        return 1
+    fi
+    
+    if [ -z "$EMAIL" ]; then
+        error "CF_EMAIL not set"
+        return 1
+    fi
+    
+    info "Configuration variables loaded:"
+    info "  Domain: $DOMAIN"
+    info "  Email: $EMAIL"
+    info "  Zone ID: ${ZONE_ID:0:8}..."
+    info "  API Token: ${CLOUDFLARE_API_TOKEN:0:8}..."
+    
+    # Test API connectivity
+    log "Testing Cloudflare API connectivity..."
+    local response=$(curl -s -X GET "https://api.cloudflare.com/client/v4/zones/$ZONE_ID" \
+        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+        -H "Content-Type: application/json")
+    
+    local success=$(echo "$response" | jq -r '.success // false')
+    
+    if [ "$success" == "true" ]; then
+        local zone_name=$(echo "$response" | jq -r '.result.name // "unknown"')
+        log "✅ API connectivity successful - Zone: $zone_name"
+        return 0
+    else
+        error "❌ API connectivity failed"
+        echo "$response" | jq -r '.errors[]?.message // "Unknown error"' >&2
+        return 1
+    fi
 }
 
 # Check dependencies
