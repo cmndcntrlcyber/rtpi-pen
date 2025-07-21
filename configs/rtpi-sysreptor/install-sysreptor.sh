@@ -1,19 +1,25 @@
+# SysReptor installation script
+# Note: app.env configuration is now generated automatically by build scripts
+
+log() {
+    echo -e "\033[0;32m[$(date +'%Y-%m-%d %H:%M:%S')] SYSREPTOR: $1\033[0m"
+}
+
+log "Setting up SysReptor..."
+
+# Download SysReptor setup files (for reference, though we use containerized version)
+log "Downloading SysReptor setup files..."
 curl -s -L --output sysreptor.tar.gz https://github.com/syslifters/sysreptor/releases/latest/download/setup.tar.gz
 tar xzf sysreptor.tar.gz
 
-# 1) Generate and insert SECRET_KEY at line 6
-SECRET=$(openssl rand -base64 64 | tr -d '\n=')
-sed -i "6i SECRET_KEY=\"$SECRET\"" app.env
-
-# 2) (Optional) Generate and insert ENCRYPTION_KEYS at line 7
-KEY_ID=$(uuidgen)
-ENC_KEY=$(openssl rand -base64 64 | tr -d '\n=')
-sed -i "12i ENCRYPTION_KEYS=[{\"id\":\"$KEY_ID\",\"key\":\"$ENC_KEY\"}]" app.env
-
+log "Creating SysReptor volumes..."
+# Create volumes for SysReptor data
 docker volume create sysreptor-db-data
 docker volume create sysreptor-app-data
 
-docker compose up -d
+log "✅ SysReptor setup completed"
+log "Note: SysReptor configuration (app.env) is generated automatically during build process"
+log "SysReptor services will be started via docker-compose by the main build script"
 
 # SysReptor User Account Setup
 echo "============================================"
