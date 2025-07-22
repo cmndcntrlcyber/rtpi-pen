@@ -703,64 +703,88 @@ setup_ssl_certificates() {
     log "✅ SSL certificates generated and configured"
 }
 
-# Generate SysReptor configuration - Enhanced for automation
-generate_sysreptor_config() {
-    log "Generating SysReptor configuration for automated build..."
-    
-    # Create the config directory if it doesn't exist
+# Force cleanup of SysReptor configuration files
+force_cleanup_sysreptor_config() {
     local config_dir="configs/rtpi-sysreptor"
-    mkdir -p "$config_dir"
-    
-    # Create app.env file path
     local app_env_file="$config_dir/app.env"
     
-    # Pre-build cleanup - remove any existing template or problematic files
-    log "Cleaning up any existing SysReptor configuration files..."
+    log "🔄 Force cleaning SysReptor configuration for fresh generation..."
+    
+    # Backup existing config if it exists
     if [ -f "$app_env_file" ]; then
-        log "Removing existing app.env file for clean generation..."
+        local backup_file="$config_dir/app.env.bak.$(date +%Y%m%d-%H%M%S)"
+        cp "$app_env_file" "$backup_file" 2>/dev/null || true
+        log "Backed up existing config to: $backup_file"
         rm -f "$app_env_file"
     fi
     
-    # Remove any backup or template files that might interfere
-    rm -f "$config_dir/app.env.bak" "$config_dir/app.env.template" "$config_dir/app.env.example" 2>/dev/null || true
+    # Remove any template or temporary files
+    rm -f "$config_dir/app.env.template" "$config_dir/app.env.example" "$config_dir/app.env.tmp" 2>/dev/null || true
     
-    # Generate cryptographically secure keys
-    log "Generating secure cryptographic keys..."
-    local secret_key
-    local key_id
-    local enc_key
+    log "Configuration cleanup completed"
+}
+
+# Generate and validate cryptographic keys
+generate_validated_keys() {
+    log "🔐 Generating fresh cryptographic keys..."
     
-    # Generate SECRET_KEY with validation
-    secret_key=$(openssl rand -base64 64 | tr -d '\n=' | head -c 64)
-    if [ ${#secret_key} -lt 32 ]; then
-        error "Failed to generate adequate SECRET_KEY"
+    # Generate SECRET_KEY - Django compatible, no padding issues
+    SECRET_KEY=$(openssl rand -hex 32)
+    if [ ${#SECRET_KEY} -ne 64 ]; then
+        error "Failed to generate valid SECRET_KEY (expected 64 chars, got ${#SECRET_KEY})"
         return 1
     fi
     
-    # Generate ENCRYPTION_KEYS with validation
-    key_id=$(uuidgen)
-    if [ -z "$key_id" ]; then
+    # Generate UUID for encryption key
+    KEY_ID=$(uuidgen)
+    if [ -z "$KEY_ID" ]; then
         error "Failed to generate UUID for encryption key"
         return 1
     fi
     
-    enc_key=$(openssl rand -base64 44 | tr -d '\n=')
-    if [ ${#enc_key} -lt 32 ]; then
-        error "Failed to generate adequate encryption key"
+    # Generate ENCRYPTION_KEY - FIXED: Keep base64 padding, remove only newlines
+    local raw_key=$(openssl rand -base64 44 | tr -d '\n')
+    ENCRYPTION_KEY="$raw_key"
+    
+    # Validate base64 encoding immediately
+    if ! echo "$ENCRYPTION_KEY" | base64 -d >/dev/null 2>&1; then
+        error "Generated encryption key failed base64 validation"
         return 1
     fi
     
-    log "Creating clean SysReptor app.env configuration..."
+    # Ensure key meets minimum length requirements
+    local decoded_length=$(echo "$ENCRYPTION_KEY" | base64 -d | wc -c)
+    if [ "$decoded_length" -lt 32 ]; then
+        error "Encryption key too short after decoding ($decoded_length bytes, need ≥32)"
+        return 1
+    fi
     
-    # Create app.env with clean, validated configuration
-    cat > "$app_env_file" << EOF
+    log "✅ Generated and validated cryptographic keys:"
+    log "   SECRET_KEY: ${#SECRET_KEY} characters"
+    log "   ENCRYPTION_KEY: ${#ENCRYPTION_KEY} characters (${decoded_length} bytes decoded)"
+    log "   KEY_ID: $KEY_ID"
+    
+    return 0
+}
+
+# Create app.env file atomically
+create_app_env_atomic() {
+    local config_dir="configs/rtpi-sysreptor"
+    local app_env_file="$config_dir/app.env"
+    local temp_file="$config_dir/app.env.tmp"
+    
+    log "📝 Creating fresh SysReptor configuration file..."
+    
+    # Create temporary file first
+    cat > "$temp_file" << EOF
 # SysReptor Configuration
 # Generated automatically by RTPI-PEN build process
 # Build Date: $(date)
-# DO NOT EDIT MANUALLY - This file is auto-generated
+# Build ID: $(date +%Y%m%d-%H%M%S)
+# DO NOT EDIT MANUALLY - This file is auto-generated on every build
 
 # Security Keys
-SECRET_KEY=$secret_key
+SECRET_KEY=$SECRET_KEY
 
 # Database Configuration
 DATABASE_HOST=rtpi-database
@@ -769,9 +793,9 @@ DATABASE_USER=sysreptor
 DATABASE_PASSWORD=sysreptorpassword
 DATABASE_PORT=5432
 
-# Encryption Keys
-ENCRYPTION_KEYS=[{"id":"$key_id","key":"$enc_key","cipher":"AES-GCM","revoked":false}]
-DEFAULT_ENCRYPTION_KEY_ID=$key_id
+# Encryption Keys - Base64 encoded with proper padding
+ENCRYPTION_KEYS=[{"id":"$KEY_ID","key":"$ENCRYPTION_KEY","cipher":"AES-GCM","revoked":false}]
+DEFAULT_ENCRYPTION_KEY_ID=$KEY_ID
 
 # Security and Access
 ALLOWED_HOSTS=sysreptor,0.0.0.0,127.0.0.1,rtpi-pen-dev,localhost
@@ -795,26 +819,39 @@ CELERY_BROKER_URL=redis://:sysreptorredispassword@sysreptor-redis:6379/0
 CELERY_RESULT_BACKEND=redis://:sysreptorredispassword@sysreptor-redis:6379/0
 EOF
     
-    # Set proper permissions
-    chmod 644 "$app_env_file"
+    # Move temp file to final location (atomic operation)
+    if mv "$temp_file" "$app_env_file"; then
+        chmod 644 "$app_env_file"
+        log "✅ Configuration file created successfully"
+        return 0
+    else
+        error "Failed to create configuration file"
+        rm -f "$temp_file" 2>/dev/null || true
+        return 1
+    fi
+}
+
+# Comprehensive validation of app.env file
+validate_app_env_file() {
+    local config_dir="configs/rtpi-sysreptor"
+    local app_env_file="$config_dir/app.env"
     
-    # Validation checks
-    log "Validating generated configuration..."
+    log "🔍 Validating generated app.env file..."
     
     if [ ! -f "$app_env_file" ]; then
-        error "❌ Failed to create app.env file"
+        error "❌ app.env file does not exist"
         return 1
     fi
     
-    # Check file size (should be reasonable)
+    # Check file size
     local file_size=$(wc -c < "$app_env_file")
     if [ "$file_size" -lt 500 ]; then
-        error "❌ Generated app.env file is too small ($file_size bytes)"
+        error "❌ app.env file too small ($file_size bytes)"
         return 1
     fi
     
     # Check for required keys
-    local required_keys=("SECRET_KEY" "DATABASE_HOST" "ENCRYPTION_KEYS" "REDIS_HOST")
+    local required_keys=("SECRET_KEY" "DATABASE_HOST" "ENCRYPTION_KEYS" "REDIS_HOST" "DEFAULT_ENCRYPTION_KEY_ID")
     for key in "${required_keys[@]}"; do
         if ! grep -q "^$key=" "$app_env_file"; then
             error "❌ Missing required key: $key"
@@ -822,25 +859,72 @@ EOF
         fi
     done
     
-    # Check for problematic content
-    if grep -q "BIND_PORT" "$app_env_file"; then
-        error "❌ Invalid BIND_PORT configuration detected"
+    # Validate base64 encoding in ENCRYPTION_KEYS
+    local enc_key_line=$(grep "^ENCRYPTION_KEYS=" "$app_env_file")
+    local enc_key_value=$(echo "$enc_key_line" | sed -n 's/.*"key":"\([^"]*\)".*/\1/p')
+    
+    if [ -z "$enc_key_value" ]; then
+        error "❌ Could not extract encryption key from ENCRYPTION_KEYS"
         return 1
     fi
     
-    # Test if Docker Compose can parse the file
-    log "Testing Docker Compose compatibility..."
+    # Test base64 decoding
+    if ! echo "$enc_key_value" | base64 -d >/dev/null 2>&1; then
+        error "❌ Encryption key failed base64 validation: $enc_key_value"
+        return 1
+    fi
+    
+    # Test Docker environment file compatibility
     if command -v docker >/dev/null 2>&1; then
-        # Test the env file syntax
         if ! docker run --rm --env-file "$app_env_file" alpine:latest /bin/sh -c 'echo "Environment file syntax OK"' >/dev/null 2>&1; then
-            error "❌ Docker Compose cannot parse the generated env file"
+            error "❌ Docker cannot parse the env file"
             return 1
         fi
     fi
     
-    log "✅ SysReptor configuration generated and validated successfully"
-    log "Configuration file: $app_env_file"
-    log "File size: $file_size bytes"
+    log "✅ app.env file validation passed"
+    log "   File size: $file_size bytes"
+    log "   Encryption key: ${#enc_key_value} characters (base64 valid)"
+    
+    return 0
+}
+
+# Generate SysReptor configuration - Enhanced with automated fresh generation
+generate_sysreptor_config() {
+    log "🚀 Generating fresh SysReptor configuration (automated build)..."
+    
+    # Create config directory
+    local config_dir="configs/rtpi-sysreptor"
+    mkdir -p "$config_dir"
+    
+    # Step 1: Force cleanup of existing configs
+    if ! force_cleanup_sysreptor_config; then
+        error "Failed to cleanup existing configuration"
+        return 1
+    fi
+    
+    # Step 2: Generate and validate new keys
+    if ! generate_validated_keys; then
+        error "Failed to generate cryptographic keys"
+        return 1
+    fi
+    
+    # Step 3: Create new configuration file atomically
+    if ! create_app_env_atomic; then
+        error "Failed to create app.env file"
+        return 1
+    fi
+    
+    # Step 4: Comprehensive validation
+    if ! validate_app_env_file; then
+        error "Generated configuration failed validation"
+        return 1
+    fi
+    
+    log "✅ SysReptor configuration generated successfully"
+    log "   Location: $config_dir/app.env"
+    log "   Status: Fresh generation with validated keys"
+    log "   Build: Automated and secure"
     
     return 0
 }
