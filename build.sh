@@ -703,33 +703,88 @@ setup_ssl_certificates() {
     log "✅ SSL certificates generated and configured"
 }
 
-# Generate SysReptor configuration
-generate_sysreptor_config() {
-    log "Generating SysReptor configuration..."
-    
-    # Create the config directory if it doesn't exist
+# Force cleanup of SysReptor configuration files
+force_cleanup_sysreptor_config() {
     local config_dir="configs/rtpi-sysreptor"
-    mkdir -p "$config_dir"
-    
-    # Create app.env file
     local app_env_file="$config_dir/app.env"
     
-    # Generate SECRET_KEY
-    local secret_key=$(openssl rand -base64 64 | tr -d '\n=')
+    log "🔄 Force cleaning SysReptor configuration for fresh generation..."
     
-    # Generate ENCRYPTION_KEYS
-    local key_id=$(uuidgen)
-    local enc_key=$(openssl rand -base64 64 | tr -d '\n=')
+    # Backup existing config if it exists
+    if [ -f "$app_env_file" ]; then
+        local backup_file="$config_dir/app.env.bak.$(date +%Y%m%d-%H%M%S)"
+        cp "$app_env_file" "$backup_file" 2>/dev/null || true
+        log "Backed up existing config to: $backup_file"
+        rm -f "$app_env_file"
+    fi
     
-    log "Creating SysReptor app.env configuration..."
+    # Remove any template or temporary files
+    rm -f "$config_dir/app.env.template" "$config_dir/app.env.example" "$config_dir/app.env.tmp" 2>/dev/null || true
     
-    # Create app.env with all required configuration
-    cat > "$app_env_file" << EOF
+    log "Configuration cleanup completed"
+}
+
+# Generate and validate cryptographic keys
+generate_validated_keys() {
+    log "🔐 Generating fresh cryptographic keys..."
+    
+    # Generate SECRET_KEY - Django compatible, no padding issues
+    SECRET_KEY=$(openssl rand -hex 32)
+    if [ ${#SECRET_KEY} -ne 64 ]; then
+        error "Failed to generate valid SECRET_KEY (expected 64 chars, got ${#SECRET_KEY})"
+        return 1
+    fi
+    
+    # Generate UUID for encryption key
+    KEY_ID=$(uuidgen)
+    if [ -z "$KEY_ID" ]; then
+        error "Failed to generate UUID for encryption key"
+        return 1
+    fi
+    
+    # Generate ENCRYPTION_KEY - FIXED: Keep base64 padding, remove only newlines
+    local raw_key=$(openssl rand -base64 44 | tr -d '\n')
+    ENCRYPTION_KEY="$raw_key"
+    
+    # Validate base64 encoding immediately
+    if ! echo "$ENCRYPTION_KEY" | base64 -d >/dev/null 2>&1; then
+        error "Generated encryption key failed base64 validation"
+        return 1
+    fi
+    
+    # Ensure key meets minimum length requirements
+    local decoded_length=$(echo "$ENCRYPTION_KEY" | base64 -d | wc -c)
+    if [ "$decoded_length" -lt 32 ]; then
+        error "Encryption key too short after decoding ($decoded_length bytes, need ≥32)"
+        return 1
+    fi
+    
+    log "✅ Generated and validated cryptographic keys:"
+    log "   SECRET_KEY: ${#SECRET_KEY} characters"
+    log "   ENCRYPTION_KEY: ${#ENCRYPTION_KEY} characters (${decoded_length} bytes decoded)"
+    log "   KEY_ID: $KEY_ID"
+    
+    return 0
+}
+
+# Create app.env file atomically
+create_app_env_atomic() {
+    local config_dir="configs/rtpi-sysreptor"
+    local app_env_file="$config_dir/app.env"
+    local temp_file="$config_dir/app.env.tmp"
+    
+    log "📝 Creating fresh SysReptor configuration file..."
+    
+    # Create temporary file first
+    cat > "$temp_file" << EOF
 # SysReptor Configuration
 # Generated automatically by RTPI-PEN build process
+# Build Date: $(date)
+# Build ID: $(date +%Y%m%d-%H%M%S)
+# DO NOT EDIT MANUALLY - This file is auto-generated on every build
 
 # Security Keys
-SECRET_KEY="$secret_key"
+SECRET_KEY=$SECRET_KEY
 
 # Database Configuration
 DATABASE_HOST=rtpi-database
@@ -738,11 +793,12 @@ DATABASE_USER=sysreptor
 DATABASE_PASSWORD=sysreptorpassword
 DATABASE_PORT=5432
 
-# Encryption Keys
-ENCRYPTION_KEYS=[{"id":"$key_id","key":"$enc_key"}]
+# Encryption Keys - Base64 encoded with proper padding
+ENCRYPTION_KEYS=[{"id":"$KEY_ID","key":"$ENCRYPTION_KEY","cipher":"AES-GCM","revoked":false}]
+DEFAULT_ENCRYPTION_KEY_ID=$KEY_ID
 
 # Security and Access
-ALLOWED_HOSTS=sysreptor,sysreptor.local,sysreptor.rtpi.local,0.0.0.0,127.0.0.1,rtpi-reports,localhost,$slug-reports.attck-node.net
+ALLOWED_HOSTS=sysreptor,0.0.0.0,127.0.0.1,rtpi-pen-dev,localhost
 SECURE_SSL_REDIRECT=off
 USE_X_FORWARDED_HOST=on
 DEBUG=off
@@ -757,18 +813,258 @@ REDIS_PASSWORD=sysreptorredispassword
 ENABLE_PRIVATE_DESIGNS=true
 DISABLE_WEBSOCKETS=true
 ENABLED_PLUGINS=cyberchef,graphqlvoyager,checkthehash
+
+# Performance and Scaling
+CELERY_BROKER_URL=redis://:sysreptorredispassword@sysreptor-redis:6379/0
+CELERY_RESULT_BACKEND=redis://:sysreptorredispassword@sysreptor-redis:6379/0
 EOF
     
-    # Set proper permissions
-    chmod 644 "$app_env_file"
-    
-    if [ -f "$app_env_file" ]; then
-        log "✅ SysReptor configuration generated successfully"
+    # Move temp file to final location (atomic operation)
+    if mv "$temp_file" "$app_env_file"; then
+        chmod 644 "$app_env_file"
+        log "✅ Configuration file created successfully"
         return 0
     else
-        error "❌ Failed to generate SysReptor configuration"
+        error "Failed to create configuration file"
+        rm -f "$temp_file" 2>/dev/null || true
         return 1
     fi
+}
+
+# Comprehensive validation of app.env file
+validate_app_env_file() {
+    local config_dir="configs/rtpi-sysreptor"
+    local app_env_file="$config_dir/app.env"
+    
+    log "🔍 Validating generated app.env file..."
+    
+    if [ ! -f "$app_env_file" ]; then
+        error "❌ app.env file does not exist"
+        return 1
+    fi
+    
+    # Check file size
+    local file_size=$(wc -c < "$app_env_file")
+    if [ "$file_size" -lt 500 ]; then
+        error "❌ app.env file too small ($file_size bytes)"
+        return 1
+    fi
+    
+    # Check for required keys
+    local required_keys=("SECRET_KEY" "DATABASE_HOST" "ENCRYPTION_KEYS" "REDIS_HOST" "DEFAULT_ENCRYPTION_KEY_ID")
+    for key in "${required_keys[@]}"; do
+        if ! grep -q "^$key=" "$app_env_file"; then
+            error "❌ Missing required key: $key"
+            return 1
+        fi
+    done
+    
+    # Validate base64 encoding in ENCRYPTION_KEYS
+    local enc_key_line=$(grep "^ENCRYPTION_KEYS=" "$app_env_file")
+    local enc_key_value=$(echo "$enc_key_line" | sed -n 's/.*"key":"\([^"]*\)".*/\1/p')
+    
+    if [ -z "$enc_key_value" ]; then
+        error "❌ Could not extract encryption key from ENCRYPTION_KEYS"
+        return 1
+    fi
+    
+    # Test base64 decoding
+    if ! echo "$enc_key_value" | base64 -d >/dev/null 2>&1; then
+        error "❌ Encryption key failed base64 validation: $enc_key_value"
+        return 1
+    fi
+    
+    # Test Docker environment file compatibility
+    if command -v docker >/dev/null 2>&1; then
+        if ! docker run --rm --env-file "$app_env_file" alpine:latest /bin/sh -c 'echo "Environment file syntax OK"' >/dev/null 2>&1; then
+            error "❌ Docker cannot parse the env file"
+            return 1
+        fi
+    fi
+    
+    log "✅ app.env file validation passed"
+    log "   File size: $file_size bytes"
+    log "   Encryption key: ${#enc_key_value} characters (base64 valid)"
+    
+    return 0
+}
+
+# Generate SysReptor configuration - Enhanced with automated fresh generation
+generate_sysreptor_config() {
+    log "🚀 Generating fresh SysReptor configuration (automated build)..."
+    
+    # Create config directory
+    local config_dir="configs/rtpi-sysreptor"
+    mkdir -p "$config_dir"
+    
+    # Step 1: Force cleanup of existing configs
+    if ! force_cleanup_sysreptor_config; then
+        error "Failed to cleanup existing configuration"
+        return 1
+    fi
+    
+    # Step 2: Generate and validate new keys
+    if ! generate_validated_keys; then
+        error "Failed to generate cryptographic keys"
+        return 1
+    fi
+    
+    # Step 3: Create new configuration file atomically
+    if ! create_app_env_atomic; then
+        error "Failed to create app.env file"
+        return 1
+    fi
+    
+    # Step 4: Comprehensive validation
+    if ! validate_app_env_file; then
+        error "Generated configuration failed validation"
+        return 1
+    fi
+    
+    log "✅ SysReptor configuration generated successfully"
+    log "   Location: $config_dir/app.env"
+    log "   Status: Fresh generation with validated keys"
+    log "   Build: Automated and secure"
+    
+    return 0
+}
+
+# Create SysReptor superuser after services are running
+create_sysreptor_superuser() {
+    log "Setting up SysReptor superuser account..."
+    
+    # Get current system username
+    local current_user=$(whoami)
+    local username
+    
+    # Check if running in automated mode (non-interactive terminal)
+    if [ ! -t 0 ] || [ -n "$AUTOMATED_MODE" ]; then
+        # Non-interactive/automated mode
+        username="rtpi-admin"
+        log "Running in automated mode - using default username: $username"
+    else
+        # Interactive mode
+        echo ""
+        echo "============================================"
+        echo "🔐 SysReptor User Account Configuration"
+        echo "============================================"
+        echo "Choose username option for SysReptor:"
+        echo "1. Use current system username ($current_user)"
+        echo "2. Create custom username"
+        echo "3. Use default (rtpi-admin)"
+        echo ""
+        read -p "Enter your choice (1-3) [default: 3]: " choice
+        
+        case $choice in
+            1)
+                username="$current_user"
+                log "Using current system username: $username"
+                ;;
+            2)
+                while true; do
+                    read -p "Enter custom username: " custom_username
+                    # Validate username (alphanumeric, underscore, hyphen only)
+                    if [[ "$custom_username" =~ ^[a-zA-Z0-9_-]+$ ]] && [[ ${#custom_username} -ge 3 ]]; then
+                        username="$custom_username"
+                        log "Using custom username: $username"
+                        break
+                    else
+                        error "Username must be at least 3 characters and contain only letters, numbers, underscores, or hyphens"
+                    fi
+                done
+                ;;
+            3|"")
+                username="rtpi-admin"
+                log "Using default username: $username"
+                ;;
+            *)
+                warn "Invalid choice, using default username: rtpi-admin"
+                username="rtpi-admin"
+                ;;
+        esac
+    fi
+    
+    # Wait for SysReptor service to be ready
+    log "Waiting for SysReptor service to be ready..."
+    local max_wait=120  # 2 minutes
+    local wait_time=0
+    
+    while [ $wait_time -lt $max_wait ]; do
+        if docker compose ps sysreptor-app | grep -q "Up"; then
+            log "SysReptor service is running"
+            break
+        fi
+        
+        if [ $wait_time -eq 0 ]; then
+            info "Waiting for sysreptor-app service to start..."
+        fi
+        
+        sleep 5
+        wait_time=$((wait_time + 5))
+    done
+    
+    if [ $wait_time -ge $max_wait ]; then
+        error "SysReptor service failed to start within timeout"
+        return 1
+    fi
+    
+    # Additional wait for service initialization
+    log "Waiting for SysReptor to complete initialization..."
+    sleep 15
+    
+    # Create superuser with automated credentials for non-interactive mode
+    log "Creating SysReptor superuser account: $username"
+    
+    local max_attempts=3
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        info "Attempt $attempt of $max_attempts..."
+        
+        if [ ! -t 0 ] || [ -n "$AUTOMATED_MODE" ]; then
+            # Automated mode - create user with default credentials
+            if docker compose exec -T sysreptor-app python3 manage.py shell << EOF
+import os
+from django.contrib.auth import get_user_model
+User = get_user_model()
+if not User.objects.filter(username='$username').exists():
+    user = User.objects.create_superuser('$username', 'admin@rtpi.local', 'rtpi-admin-password')
+    print(f"Superuser '{username}' created successfully!")
+else:
+    print(f"Superuser '{username}' already exists")
+EOF
+            then
+                log "✅ SysReptor superuser '$username' created successfully!"
+                log "🌐 Access SysReptor at: http://localhost:7777"
+                log "🔑 Username: $username"
+                log "🔑 Password: rtpi-admin-password"
+                return 0
+            fi
+        else
+            # Interactive mode - prompt for credentials
+            if docker compose exec sysreptor-app python3 manage.py createsuperuser --username "$username"; then
+                log "✅ SysReptor superuser '$username' created successfully!"
+                log "🌐 Access SysReptor at: http://localhost:7777"
+                log "🔑 Username: $username"
+                return 0
+            fi
+        fi
+        
+        warn "Failed to create superuser (attempt $attempt/$max_attempts)"
+        
+        if [ $attempt -eq $max_attempts ]; then
+            error "All attempts failed. You can create the superuser manually later:"
+            error "   docker compose exec sysreptor-app python3 manage.py createsuperuser --username $username"
+            return 1
+        else
+            info "Retrying in 5 seconds..."
+            sleep 5
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    return 1
 }
 
 # Update Docker Compose for SSL certificate mounting
@@ -966,6 +1262,9 @@ main() {
     
     start_containerized_services
     wait_for_services
+    
+    # Create SysReptor superuser after services are ready
+    create_sysreptor_superuser
     
     # Phase 3: Validation and status
     log "Phase 3: Validation"

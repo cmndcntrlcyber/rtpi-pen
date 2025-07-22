@@ -2,8 +2,6 @@
 # Multi-Container Docker Compose Configuration (PRIMARY)
 # This is the main deployment method - prioritized over single container approach
 
-version: '3.8'
-
 networks:
   rtpi_frontend:
     driver: bridge
