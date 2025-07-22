@@ -263,7 +263,7 @@ services:
   # Additional containerized Kasm services for specialized workspaces
 
   kasm-vscode:
-    image: kasmweb/vs-code:1.17.0
+    image: kasmweb/vs-code:1.17.0-rolling-daily
     container_name: kasm-vscode
     platform: linux/amd64
     restart: unless-stopped
