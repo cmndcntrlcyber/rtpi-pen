@@ -936,6 +936,144 @@ echo "KASM_INSTALLED=true" >> /etc/environment
 # Add current user to docker group
 usermod -aG docker $USER || true
 
+# Create SysReptor superuser after services are running
+create_sysreptor_superuser() {
+    log "Setting up SysReptor superuser account..."
+    
+    # Get current system username
+    local current_user=$(whoami)
+    local username
+    
+    # Check if running in automated mode (non-interactive terminal)
+    if [ ! -t 0 ] || [ -n "$AUTOMATED_MODE" ]; then
+        # Non-interactive/automated mode
+        username="rtpi-admin"
+        log "Running in automated mode - using default username: $username"
+    else
+        # Interactive mode
+        echo ""
+        echo "============================================"
+        echo "🔐 SysReptor User Account Configuration"
+        echo "============================================"
+        echo "Choose username option for SysReptor:"
+        echo "1. Use current system username ($current_user)"
+        echo "2. Create custom username"
+        echo "3. Use default (rtpi-admin)"
+        echo ""
+        read -p "Enter your choice (1-3) [default: 3]: " choice
+        
+        case $choice in
+            1)
+                username="$current_user"
+                log "Using current system username: $username"
+                ;;
+            2)
+                while true; do
+                    read -p "Enter custom username: " custom_username
+                    # Validate username (alphanumeric, underscore, hyphen only)
+                    if [[ "$custom_username" =~ ^[a-zA-Z0-9_-]+$ ]] && [[ ${#custom_username} -ge 3 ]]; then
+                        username="$custom_username"
+                        log "Using custom username: $username"
+                        break
+                    else
+                        error "Username must be at least 3 characters and contain only letters, numbers, underscores, or hyphens"
+                    fi
+                done
+                ;;
+            3|"")
+                username="rtpi-admin"
+                log "Using default username: $username"
+                ;;
+            *)
+                warn "Invalid choice, using default username: rtpi-admin"
+                username="rtpi-admin"
+                ;;
+        esac
+    fi
+    
+    # Wait for SysReptor service to be ready
+    log "Waiting for SysReptor service to be ready..."
+    local max_wait=120  # 2 minutes
+    local wait_time=0
+    
+    while [ $wait_time -lt $max_wait ]; do
+        if docker compose ps sysreptor-app | grep -q "Up"; then
+            log "SysReptor service is running"
+            break
+        fi
+        
+        if [ $wait_time -eq 0 ]; then
+            info "Waiting for sysreptor-app service to start..."
+        fi
+        
+        sleep 5
+        wait_time=$((wait_time + 5))
+    done
+    
+    if [ $wait_time -ge $max_wait ]; then
+        error "SysReptor service failed to start within timeout"
+        return 1
+    fi
+    
+    # Additional wait for service initialization
+    log "Waiting for SysReptor to complete initialization..."
+    sleep 15
+    
+    # Create superuser with automated credentials for non-interactive mode
+    log "Creating SysReptor superuser account: $username"
+    
+    local max_attempts=3
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        info "Attempt $attempt of $max_attempts..."
+        
+        if [ ! -t 0 ] || [ -n "$AUTOMATED_MODE" ]; then
+            # Automated mode - create user with default credentials
+            if docker compose exec -T sysreptor-app python3 manage.py shell << EOF
+import os
+from django.contrib.auth import get_user_model
+User = get_user_model()
+if not User.objects.filter(username='$username').exists():
+    user = User.objects.create_superuser('$username', 'admin@rtpi.local', 'rtpi-admin-password')
+    print(f"Superuser '{username}' created successfully!")
+else:
+    print(f"Superuser '{username}' already exists")
+EOF
+            then
+                log "✅ SysReptor superuser '$username' created successfully!"
+                log "🌐 Access SysReptor at: http://localhost:7777"
+                log "🔑 Username: $username"
+                log "🔑 Password: rtpi-admin-password"
+                return 0
+            fi
+        else
+            # Interactive mode - prompt for credentials
+            if docker compose exec sysreptor-app python3 manage.py createsuperuser --username "$username"; then
+                log "✅ SysReptor superuser '$username' created successfully!"
+                log "🌐 Access SysReptor at: http://localhost:7777"
+                log "🔑 Username: $username"
+                return 0
+            fi
+        fi
+        
+        warn "Failed to create superuser (attempt $attempt/$max_attempts)"
+        
+        if [ $attempt -eq $max_attempts ]; then
+            error "All attempts failed. You can create the superuser manually later:"
+            error "   docker compose exec sysreptor-app python3 manage.py createsuperuser --username $username"
+            return 1
+        else
+            info "Retrying in 5 seconds..."
+            sleep 5
+        fi
+        
+        attempt=$((attempt + 1))
+    done
+    
+    return 1
+}
+
 echo "🐳 Building and starting containerized services..."
 echo "-------------------------------------"
 cd /opt/rtpi-pen
@@ -961,6 +1099,9 @@ fi
 
 log "Waiting for services to stabilize..."
 sleep 30
+
+# Create SysReptor superuser after services are ready
+create_sysreptor_superuser
 
 echo "📋 Installation Summary:"
 echo "-------------------------------------"
