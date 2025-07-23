@@ -23,6 +23,10 @@ import psycopg2
 import yaml
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+# Import enhanced configuration validation and repair
+from config_validator import ConfigurationValidator
+from config_autorepair import ConfigurationAutoRepair
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -84,6 +88,11 @@ class RTHealerService:
         self.running = True
         self.healing_actions = 0
         self.last_check_time = datetime.now()
+        
+        # Enhanced configuration validation and repair
+        self.config_validator = ConfigurationValidator()
+        self.config_autorepair = ConfigurationAutoRepair()
+        self.last_config_validation = None
         
         # Container-specific healing strategies (containerized services only)
         self.healing_strategies = {
@@ -426,12 +435,17 @@ password_encryption = md5
             return {'name': container_name, 'status': 'error', 'error': str(e)}
     
     def _restart_container(self, container_name: str) -> bool:
-        """Restart a container with proper error handling"""
+        """Restart a container with proper error handling and pre-startup validation"""
         try:
             container = self.docker_client.containers.get(container_name)
             
             if not self.failure_tracker.should_restart(container_name):
                 logger.info(f"Container {container_name} in backoff period, skipping restart")
+                return False
+            
+            # Perform pre-startup validation
+            if not self._perform_prestart_validation(container_name):
+                logger.error(f"Pre-startup validation failed for {container_name}, aborting restart")
                 return False
             
             logger.info(f"Restarting container: {container_name}")
@@ -524,6 +538,74 @@ password_encryption = md5
         except Exception as e:
             logger.error(f"Error during log cleanup: {e}")
     
+    def _validate_configurations(self):
+        """Proactively validate all service configurations"""
+        try:
+            logger.info("🔍 Starting proactive configuration validation...")
+            
+            # Run comprehensive validation
+            validation_summary = self.config_validator.run_comprehensive_validation()
+            self.last_config_validation = validation_summary
+            
+            # Check if any configurations failed validation
+            if validation_summary['failed_checks'] > 0:
+                logger.warning(f"⚠️ Configuration validation found {validation_summary['failed_checks']} issues")
+                
+                # Attempt automatic repairs
+                logger.info("🔧 Attempting automatic configuration repair...")
+                repair_result = self.config_autorepair.run_repair_cycle()
+                
+                if repair_result['overall_success']:
+                    logger.info("✅ Configuration issues automatically resolved")
+                    self.healing_actions += repair_result['repairs_performed']['successful_repairs'] if repair_result['repairs_performed'] else 0
+                else:
+                    logger.error("❌ Some configuration issues could not be automatically resolved")
+                    
+                    # Log details of failed repairs
+                    if repair_result['repairs_performed']:
+                        for detail in repair_result['repairs_performed']['repair_details']:
+                            if detail['status'] != 'SUCCESS':
+                                logger.error(f"Failed repair: {detail['action']} - {detail['message']}")
+            else:
+                logger.info("✅ All configuration validations passed")
+                
+        except Exception as e:
+            logger.error(f"Error during configuration validation: {e}")
+    
+    def _perform_prestart_validation(self, container_name: str) -> bool:
+        """Perform pre-startup configuration validation for specific containers"""
+        try:
+            logger.info(f"🔍 Pre-startup validation for {container_name}")
+            
+            # Container-specific validation
+            if container_name == 'sysreptor-app':
+                sysreptor_config = "/opt/rtpi-pen/configs/rtpi-sysreptor/app.env"
+                validation_results = self.config_validator.validate_sysreptor_configuration(sysreptor_config)
+                
+                failed_validations = [r for r in validation_results if not r.passed]
+                if failed_validations:
+                    logger.warning(f"⚠️ SysReptor configuration issues detected, attempting repair...")
+                    
+                    # Attempt repairs
+                    repair_summary = self.config_autorepair.repair_validation_failures(failed_validations)
+                    
+                    if repair_summary['successful_repairs'] > 0:
+                        logger.info(f"✅ Repaired {repair_summary['successful_repairs']} SysReptor configuration issues")
+                        return True
+                    else:
+                        logger.error("❌ Could not repair SysReptor configuration issues")
+                        return False
+                else:
+                    logger.info("✅ SysReptor configuration validation passed")
+                    return True
+            
+            # Add other container-specific validations as needed
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during pre-startup validation for {container_name}: {e}")
+            return False
+    
     def _backup_configurations(self):
         """Backup critical configurations"""
         try:
@@ -536,8 +618,8 @@ password_encryption = md5
             # Backup critical configs
             configs_to_backup = [
                 "/opt/kasm/1.17.0/conf",
-                "/home/cmndcntrl/rtpi-pen/configs",
-                "/home/cmndcntrl/rtpi-pen/docker-compose.yml"
+                "/opt/rtpi-pen/configs",
+                "/opt/rtpi-pen/docker-compose.yml"
             ]
             
             for config_path in configs_to_backup:
@@ -568,6 +650,7 @@ password_encryption = md5
         
         # Schedule periodic tasks
         schedule.every(30).seconds.do(self._monitor_containers)
+        schedule.every(30).minutes.do(self._validate_configurations)  # Proactive config validation
         schedule.every(1).hours.do(self._cleanup_logs)
         schedule.every(6).hours.do(self._backup_configurations)
         

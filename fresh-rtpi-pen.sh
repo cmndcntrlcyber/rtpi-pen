@@ -1,37 +1,33 @@
 #!/bin/bash
 
-# RTPI-PEN Fresh Installation Script
+# RTPI-PEN Fresh Installation Script - Enhanced with Resilience Framework
 # Sets up complete Red Team Penetration Testing Infrastructure
-# Version: 1.17.0 (Native Kasm + Containerized Services)
+# Version: 2.0.0 (Native Kasm + Containerized Services + Resilience Framework)
 
 set -e  # Exit on any error
 
-echo "🚀 Starting RTPI-PEN Fresh Installation..."
-echo "=============================================="
+echo "🚀 Starting RTPI-PEN Fresh Installation with Resilience Framework..."
+echo "=================================================================="
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Logging function
-log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
-}
-
-warn() {
-    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
-}
-
-error() {
-    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
-}
-
-info() {
-    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $1${NC}"
-}
+# Load Installation Resilience Framework
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/lib/installation-resilience.sh" ]; then
+    source "$SCRIPT_DIR/lib/installation-resilience.sh"
+    log "✅ Resilience framework loaded"
+else
+    echo "⚠️  Warning: Resilience framework not found, using basic installation"
+    # Fallback logging functions
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    NC='\033[0m'
+    
+    log() { echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"; }
+    warn() { echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"; }
+    error() { echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"; }
+    info() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $1${NC}"; }
+fi
 
 # Kasm detection and cleanup functions
 check_kasm_status() {
@@ -461,11 +457,28 @@ ensure_apt_health() {
     fi
 }
 
+# 🛡️ RESILIENCE CHECK PHASE
+echo "🛡️ Running Installation Resilience Check..."
+echo "=============================================="
+
+# Run comprehensive resilience check if framework is loaded
+if command -v run_installation_resilience_check >/dev/null 2>&1; then
+    if ! run_installation_resilience_check; then
+        error "❌ Installation resilience check failed - aborting installation"
+        error "Please address the issues above and try again"
+        exit 1
+    fi
+    save_checkpoint "RESILIENCE_CHECK_PASSED"
+else
+    warn "⚠️  Resilience framework not available - using basic installation"
+fi
+
 # Basic system updates and essential packages
 echo "📦 Installing system packages..."
 
 # Ensure APT is healthy before proceeding
 ensure_apt_health
+save_checkpoint "APT_HEALTH_ENSURED"
 apt-get update
 apt upgrade -y
 apt-get install -y jython
@@ -581,12 +594,39 @@ esac
 if [ "$SKIP_KASM_INSTALLATION" != "true" ]; then
     cd /opt
 
-    # Download Kasm 1.17.0 release files
-    echo "Downloading Kasm 1.17.0 release files..."
-    curl -O https://kasm-static-content.s3.amazonaws.com/kasm_release_1.17.0.7f020d.tar.gz
-    curl -O https://kasm-static-content.s3.amazonaws.com/kasm_release_service_images_amd64_1.17.0.7f020d.tar.gz
-    curl -O https://kasm-static-content.s3.amazonaws.com/kasm_release_workspace_images_amd64_1.17.0.7f020d.tar.gz
-    curl -O https://kasm-static-content.s3.amazonaws.com/kasm_release_plugin_images_amd64_1.17.0.7f020d.tar.gz
+    # Download Kasm 1.17.0 release files with resilience
+    echo "Downloading Kasm 1.17.0 release files with resilience..."
+    
+    local kasm_files=(
+        "https://kasm-static-content.s3.amazonaws.com/kasm_release_1.17.0.7f020d.tar.gz"
+        "https://kasm-static-content.s3.amazonaws.com/kasm_release_service_images_amd64_1.17.0.7f020d.tar.gz"
+        "https://kasm-static-content.s3.amazonaws.com/kasm_release_workspace_images_amd64_1.17.0.7f020d.tar.gz"
+        "https://kasm-static-content.s3.amazonaws.com/kasm_release_plugin_images_amd64_1.17.0.7f020d.tar.gz"
+    )
+    
+    # Use resilient download if available, otherwise fallback to curl
+    local download_failed=false
+    for url in "${kasm_files[@]}"; do
+        local filename=$(basename "$url")
+        if command -v download_with_resilience >/dev/null 2>&1; then
+            if ! download_with_resilience "$url" "$filename"; then
+                download_failed=true
+                break
+            fi
+        else
+            if ! curl -O "$url"; then
+                download_failed=true
+                break
+            fi
+        fi
+    done
+    
+    if [ "$download_failed" = true ]; then
+        error "❌ Failed to download Kasm installation files"
+        exit 1
+    fi
+    
+    save_checkpoint "KASM_FILES_DOWNLOADED"
 
     # Extract and install Kasm
     echo "Installing Kasm Workspaces..."
