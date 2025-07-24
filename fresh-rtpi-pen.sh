@@ -597,7 +597,7 @@ if [ "$SKIP_KASM_INSTALLATION" != "true" ]; then
     # Download Kasm 1.17.0 release files with resilience
     echo "Downloading Kasm 1.17.0 release files with resilience..."
     
-    local kasm_files=(
+    kasm_files=(
         "https://kasm-static-content.s3.amazonaws.com/kasm_release_1.17.0.7f020d.tar.gz"
         "https://kasm-static-content.s3.amazonaws.com/kasm_release_service_images_amd64_1.17.0.7f020d.tar.gz"
         "https://kasm-static-content.s3.amazonaws.com/kasm_release_workspace_images_amd64_1.17.0.7f020d.tar.gz"
@@ -605,9 +605,9 @@ if [ "$SKIP_KASM_INSTALLATION" != "true" ]; then
     )
     
     # Use resilient download if available, otherwise fallback to curl
-    local download_failed=false
+    download_failed=false
     for url in "${kasm_files[@]}"; do
-        local filename=$(basename "$url")
+        filename=$(basename "$url")
         if command -v download_with_resilience >/dev/null 2>&1; then
             if ! download_with_resilience "$url" "$filename"; then
                 download_failed=true
@@ -846,7 +846,7 @@ generate_sysreptor_config() {
     # Remove any backup or template files that might interfere
     rm -f "$config_dir/app.env.bak" "$config_dir/app.env.template" "$config_dir/app.env.example" 2>/dev/null || true
     
-    # Generate cryptographically secure keys
+    # Generate cryptographically secure keys with proper base64 encoding
     log "Generating secure cryptographic keys..."
     local secret_key
     local key_id
@@ -859,16 +859,23 @@ generate_sysreptor_config() {
         return 1
     fi
     
-    # Generate ENCRYPTION_KEYS with validation
+    # Generate ENCRYPTION_KEYS with validation - ensure proper base64 padding
     key_id=$(uuidgen)
     if [ -z "$key_id" ]; then
         error "Failed to generate UUID for encryption key"
         return 1
     fi
     
-    enc_key=$(openssl rand -base64 44 | tr -d '\n=')
-    if [ ${#enc_key} -lt 32 ]; then
+    # Generate properly padded base64 encryption key (32 bytes = 44 characters with padding)
+    enc_key=$(python3 -c "import base64, secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())")
+    if [ -z "$enc_key" ] || [ ${#enc_key} -lt 32 ]; then
         error "Failed to generate adequate encryption key"
+        return 1
+    fi
+    
+    # Validate the generated key is proper base64
+    if ! echo "$enc_key" | base64 -d > /dev/null 2>&1; then
+        error "Generated encryption key has invalid base64 format"
         return 1
     fi
     
@@ -896,7 +903,7 @@ ENCRYPTION_KEYS=[{"id":"$key_id","key":"$enc_key","cipher":"AES-GCM","revoked":f
 DEFAULT_ENCRYPTION_KEY_ID=$key_id
 
 # Security and Access
-ALLOWED_HOSTS=sysreptor,0.0.0.0,127.0.0.1,rtpi-pen-dev,localhost
+ALLOWED_HOSTS=sysreptor,0.0.0.0,127.0.0.1,rtpi-pen-dev,localhost,sysreptor.rtpi.local
 SECURE_SSL_REDIRECT=off
 USE_X_FORWARDED_HOST=on
 DEBUG=off
@@ -1059,6 +1066,42 @@ create_sysreptor_superuser() {
     log "Waiting for SysReptor to complete initialization..."
     sleep 15
     
+    # Ensure clean database state to prevent encryption key conflicts
+    log "Ensuring clean database state for SysReptor..."
+    if docker compose exec -T sysreptor-app python3 manage.py shell << 'EOF'
+from django.contrib.auth import get_user_model
+from django.core.management import execute_from_command_line
+import sys
+
+# Check if there are any existing users that might cause encryption key conflicts
+User = get_user_model()
+try:
+    user_count = User.objects.count()
+    print(f"Found {user_count} existing users in database")
+    if user_count > 0:
+        print("Database contains existing data - this is a fresh install, flushing database...")
+        # Flush the database to ensure clean state
+        from django.core.management.commands.flush import Command as FlushCommand
+        from django.core.management.base import CommandError
+        try:
+            from io import StringIO
+            from django.core.management import call_command
+            call_command('flush', '--noinput')
+            print("✅ Database flushed successfully")
+        except Exception as e:
+            print(f"❌ Database flush failed: {e}")
+            sys.exit(1)
+    else:
+        print("✅ Database is clean, proceeding...")
+except Exception as e:
+    print(f"⚠️ Database check failed, proceeding with caution: {e}")
+EOF
+    then
+        log "✅ Database state validated successfully"
+    else
+        warn "⚠️ Database validation encountered issues, but continuing..."
+    fi
+    
     # Create superuser with automated credentials for non-interactive mode
     log "Creating SysReptor superuser account: $username"
     
@@ -1120,6 +1163,18 @@ cd /opt/rtpi-pen
 
 # Generate SysReptor configuration before building containers
 generate_sysreptor_config
+
+# Run encryption key fix as an additional safety measure
+log "Running SysReptor encryption key validation and fix..."
+if [ -f "./repair-scripts/fix-sysreptor-encryption-keys.sh" ]; then
+    if ./repair-scripts/fix-sysreptor-encryption-keys.sh; then
+        log "✅ SysReptor encryption keys validated successfully"
+    else
+        warn "⚠️  Encryption key validation script encountered issues, but continuing..."
+    fi
+else
+    warn "⚠️  Encryption key fix script not found, skipping validation..."
+fi
 
 log "Building Docker images..."
 if docker compose build; then

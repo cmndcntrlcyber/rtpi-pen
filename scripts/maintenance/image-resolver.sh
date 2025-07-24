@@ -1,0 +1,346 @@
+#!/bin/bash
+# RTPI-PEN Dynamic Image Tag Resolution System
+# Automatically resolves available Docker image tags from registries
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Logging functions
+log() {
+    echo -e "${BLUE}[$(date '+%Y-%m-%d %H:%M:%S')] IMAGE-RESOLVER:${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] IMAGE-RESOLVER: ✅${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[$(date '+%Y-%m-%d %H:%M:%S')] IMAGE-RESOLVER: ⚠️${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[$(date '+%Y-%m-%d %H:%M:%S')] IMAGE-RESOLVER: ❌${NC} $1"
+}
+
+# Configuration
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+FALLBACK_CONFIG="$SCRIPT_DIR/configs/image-fallbacks.conf"
+RESOLVED_TAGS_FILE="$(dirname $(dirname "$SCRIPT_DIR"))/configs/resolved-image-tags.env"
+
+# Create directories if they don't exist
+mkdir -p "$PROJECT_ROOT/configs"
+
+# Docker Hub API base URL
+DOCKERHUB_API="https://registry.hub.docker.com/v2/repositories"
+
+# Function to get available tags for a Docker image
+get_available_tags() {
+    local image_name="$1"
+    local max_tags="${2:-50}"
+    
+    log "Fetching available tags for $image_name..."
+    
+    # Split image name into namespace and repository
+    local namespace=$(echo "$image_name" | cut -d'/' -f1)
+    local repository=$(echo "$image_name" | cut -d'/' -f2)
+    
+    # Make API request to Docker Hub
+    local api_url="$DOCKERHUB_API/$namespace/$repository/tags?page_size=$max_tags"
+    
+    # Use curl with timeout and retry logic
+    local response
+    for attempt in 1 2 3; do
+        if response=$(curl -s --connect-timeout 10 --max-time 30 "$api_url" 2>/dev/null); then
+            break
+        else
+            log_warning "Attempt $attempt failed for $image_name, retrying..."
+            sleep 2
+        fi
+    done
+    
+    if [ -z "$response" ]; then
+        log_error "Failed to fetch tags for $image_name after 3 attempts"
+        return 1
+    fi
+    
+    # Parse JSON response and extract tag names
+    local tags=$(echo "$response" | grep -o '"name":"[^"]*"' | sed 's/"name":"//g' | sed 's/"//g' | sort -V)
+    
+    if [ -z "$tags" ]; then
+        log_error "No tags found for $image_name"
+        return 1
+    fi
+    
+    echo "$tags"
+}
+
+# Function to select the best available tag based on preferences
+select_best_tag() {
+    local image_name="$1"
+    local available_tags="$2"
+    local preferences="$3"
+    
+    log "Selecting best tag for $image_name from preferences: $preferences"
+    
+    # Convert preferences to array
+    IFS=',' read -ra PREF_ARRAY <<< "$preferences"
+    
+    # Try each preference in order
+    for pref in "${PREF_ARRAY[@]}"; do
+        pref=$(echo "$pref" | xargs)  # Trim whitespace
+        
+        # Check for exact match
+        if echo "$available_tags" | grep -q "^$pref$"; then
+            log_success "Found exact match: $pref for $image_name"
+            echo "$pref"
+            return 0
+        fi
+        
+        # Check for pattern match (e.g., 1.17.* matches 1.17.0, 1.17.1, etc.)
+        if [[ "$pref" == *"*" ]]; then
+            local pattern=$(echo "$pref" | sed 's/\*/.*/')
+            local match=$(echo "$available_tags" | grep "^$pattern$" | head -1)
+            if [ -n "$match" ]; then
+                log_success "Found pattern match: $match for $image_name (pattern: $pref)"
+                echo "$match"
+                return 0
+            fi
+        fi
+        
+        # Check for partial match (for rolling tags)
+        if echo "$available_tags" | grep -q "$pref"; then
+            local match=$(echo "$available_tags" | grep "$pref" | head -1)
+            log_success "Found partial match: $match for $image_name (looking for: $pref)"
+            echo "$match"
+            return 0
+        fi
+    done
+    
+    # If no preferences match, use the latest tag if available
+    if echo "$available_tags" | grep -q "^latest$"; then
+        log_warning "No preferences matched for $image_name, using 'latest'"
+        echo "latest"
+        return 0
+    fi
+    
+    # If no latest tag, use the first available tag
+    local first_tag=$(echo "$available_tags" | head -1)
+    if [ -n "$first_tag" ]; then
+        log_warning "No preferences matched for $image_name, using first available: $first_tag"
+        echo "$first_tag"
+        return 0
+    fi
+    
+    log_error "No suitable tag found for $image_name"
+    return 1
+}
+
+# Function to resolve all image tags
+resolve_all_tags() {
+    log "Starting image tag resolution process..."
+    
+    # Load fallback configuration
+    if [ ! -f "$FALLBACK_CONFIG" ]; then
+        log_error "Fallback configuration not found: $FALLBACK_CONFIG"
+        return 1
+    fi
+    
+    # Create/clear resolved tags file
+    cat > "$RESOLVED_TAGS_FILE" << 'EOF'
+# Auto-generated resolved image tags
+# Generated by image-resolver.sh
+# Do not edit manually
+EOF
+    
+    local success_count=0
+    local failure_count=0
+    
+    # Read configuration and resolve each image
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$(echo "$line" | xargs)" ]] && continue
+        
+        # Parse configuration line: IMAGE_VAR=image_name:preferences
+        if [[ "$line" =~ ^([^=]+)=([^:]+):(.+)$ ]]; then
+            local var_name="${BASH_REMATCH[1]}"
+            local image_name="${BASH_REMATCH[2]}"
+            local preferences="${BASH_REMATCH[3]}"
+            
+            log "Resolving $var_name for image $image_name..."
+            
+            # Get available tags
+            local available_tags
+            if available_tags=$(get_available_tags "$image_name"); then
+                # Select best tag
+                local selected_tag
+                if selected_tag=$(select_best_tag "$image_name" "$available_tags" "$preferences"); then
+                    echo "$var_name=$image_name:$selected_tag" >> "$RESOLVED_TAGS_FILE"
+                    log_success "Resolved $var_name=$image_name:$selected_tag"
+                    ((success_count++))
+                else
+                    log_error "Failed to select tag for $image_name"
+                    echo "# FAILED: $var_name=$image_name (no suitable tag found)" >> "$RESOLVED_TAGS_FILE"
+                    ((failure_count++))
+                fi
+            else
+                log_error "Failed to fetch tags for $image_name"
+                echo "# FAILED: $var_name=$image_name (API error)" >> "$RESOLVED_TAGS_FILE"
+                ((failure_count++))
+            fi
+        else
+            log_warning "Skipping invalid configuration line: $line"
+        fi
+    done < "$FALLBACK_CONFIG"
+    
+    # Add timestamp to resolved tags file
+    echo "" >> "$RESOLVED_TAGS_FILE"
+    echo "# Resolution completed: $(date)" >> "$RESOLVED_TAGS_FILE"
+    echo "# Success: $success_count, Failures: $failure_count" >> "$RESOLVED_TAGS_FILE"
+    
+    log_success "Image resolution completed: $success_count successful, $failure_count failed"
+    
+    if [ $failure_count -eq 0 ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to check if an image tag is available locally or can be pulled
+verify_image_availability() {
+    local full_image_name="$1"
+    
+    log "Verifying availability of $full_image_name..."
+    
+    # Check if image exists locally
+    if docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "^$full_image_name$"; then
+        log_success "Image $full_image_name is available locally"
+        return 0
+    fi
+    
+    # Try to pull the image manifest (lightweight check)
+    if docker manifest inspect "$full_image_name" >/dev/null 2>&1; then
+        log_success "Image $full_image_name is available for pull"
+        return 0
+    fi
+    
+    log_error "Image $full_image_name is not available"
+    return 1
+}
+
+# Function to verify all resolved images
+verify_all_resolved_images() {
+    log "Verifying all resolved images..."
+    
+    if [ ! -f "$RESOLVED_TAGS_FILE" ]; then
+        log_error "Resolved tags file not found: $RESOLVED_TAGS_FILE"
+        return 1
+    fi
+    
+    local success_count=0
+    local failure_count=0
+    
+    # Read resolved tags and verify each one
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "$(echo "$line" | xargs)" ]] && continue
+        
+        # Parse resolved tag line: VAR_NAME=image:tag
+        if [[ "$line" =~ ^([^=]+)=(.+)$ ]]; then
+            local var_name="${BASH_REMATCH[1]}"
+            local full_image_name="${BASH_REMATCH[2]}"
+            
+            if verify_image_availability "$full_image_name"; then
+                ((success_count++))
+            else
+                ((failure_count++))
+            fi
+        fi
+    done < "$RESOLVED_TAGS_FILE"
+    
+    log_success "Image verification completed: $success_count available, $failure_count unavailable"
+    
+    if [ $failure_count -eq 0 ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to show help
+show_help() {
+    echo "RTPI-PEN Image Resolver"
+    echo ""
+    echo "Usage: $0 [COMMAND] [OPTIONS]"
+    echo ""
+    echo "Commands:"
+    echo "  resolve       Resolve all image tags based on configuration"
+    echo "  verify        Verify availability of resolved images"
+    echo "  tags IMAGE    Get available tags for a specific image"
+    echo "  help          Show this help message"
+    echo ""
+    echo "Options:"
+    echo "  --config FILE   Use custom fallback configuration file"
+    echo "  --output FILE   Use custom output file for resolved tags"
+    echo ""
+    echo "Examples:"
+    echo "  $0 resolve                    # Resolve all image tags"
+    echo "  $0 verify                     # Verify resolved images"
+    echo "  $0 tags kasmweb/vs-code      # Get available tags for specific image"
+}
+
+# Main function
+main() {
+    case "${1:-}" in
+        resolve)
+            resolve_all_tags
+            ;;
+        verify)
+            verify_all_resolved_images
+            ;;
+        tags)
+            if [ -z "$2" ]; then
+                log_error "Image name required for tags command"
+                show_help
+                exit 1
+            fi
+            get_available_tags "$2"
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        "")
+            log "No command specified, running full resolution process..."
+            resolve_all_tags
+            ;;
+        *)
+            log_error "Unknown command: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# Handle custom configuration file
+if [ "$1" = "--config" ] && [ -n "$2" ]; then
+    FALLBACK_CONFIG="$2"
+    shift 2
+fi
+
+# Handle custom output file
+if [ "$1" = "--output" ] && [ -n "$2" ]; then
+    RESOLVED_TAGS_FILE="$2"
+    shift 2
+fi
+
+# Run main function with remaining arguments
+main "$@"

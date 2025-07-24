@@ -263,7 +263,7 @@ services:
   # Additional containerized Kasm services for specialized workspaces
 
   kasm-vscode:
-    image: kasmweb/vs-code:1.16.0
+    image: ${KASM_VSCODE_IMAGE:-kasmweb/vs-code:latest}
     container_name: kasm-vscode
     platform: linux/amd64
     restart: unless-stopped
@@ -310,7 +310,7 @@ services:
       - optional
 
   kasm-kali:
-    image: kasmweb/kali-rolling-desktop:1.16.0
+    image: ${KASM_KALI_IMAGE:-kasmweb/kali-rolling-desktop:latest}
     container_name: kasm-kali
     platform: linux/amd64
     restart: unless-stopped
@@ -353,7 +353,7 @@ services:
   # =============================================================================
 
   sysreptor-app:
-    image: syslifters/sysreptor:2025.37
+    image: ${SYSREPTOR_APP_IMAGE:-syslifters/sysreptor:latest}
     container_name: sysreptor-app
     restart: unless-stopped
     networks:
@@ -383,7 +383,7 @@ services:
         max-file: "3"
 
   sysreptor-caddy:
-    image: caddy:2.8
+    image: ${CADDY_IMAGE:-caddy:latest}
     container_name: sysreptor-caddy
     restart: unless-stopped
     networks:
@@ -402,7 +402,7 @@ services:
         max-file: "3"
 
   sysreptor-redis:
-    image: bitnami/redis:7.2
+    image: ${SYSREPTOR_REDIS_IMAGE:-bitnami/redis:latest}
     container_name: sysreptor-redis
     restart: unless-stopped
     networks:
@@ -423,7 +423,7 @@ services:
   # Native Empire installation runs on http://localhost:1337
 
   vaultwarden:
-    image: vaultwarden/server:1.31.0
+    image: ${VAULTWARDEN_IMAGE:-vaultwarden/server:latest}
     container_name: vaultwarden
     platform: linux/amd64
     restart: unless-stopped
@@ -458,7 +458,7 @@ services:
   # =============================================================================
 
   registry:
-    image: registry:2.8
+    image: ${REGISTRY_IMAGE:-registry:latest}
     container_name: local-registry
     restart: unless-stopped
     networks:
@@ -474,7 +474,7 @@ services:
         max-file: "3"
 
   node:
-    image: node:20
+    image: ${NODE_IMAGE:-node:latest}
     container_name: node-service
     restart: unless-stopped
     networks:
