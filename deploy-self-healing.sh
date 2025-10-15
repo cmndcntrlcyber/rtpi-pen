@@ -365,6 +365,39 @@ stop_existing_containers() {
     fi
 }
 
+# Resolve image tags and generate docker-compose.yml
+resolve_and_generate_compose() {
+    log "Resolving Docker image tags and generating compose file..."
+    
+    # Step 1: Resolve available image tags
+    log "Step 1: Resolving available Docker image tags..."
+    if ./scripts/maintenance/image-resolver.sh resolve; then
+        log_success "Image tag resolution completed successfully"
+    else
+        log_error "Image tag resolution failed"
+        log "Attempting to continue with fallback images..."
+    fi
+    
+    # Step 2: Generate docker-compose.yml from template
+    log "Step 2: Generating docker-compose.yml from template..."
+    if ./scripts/maintenance/compose-generator.sh generate; then
+        log_success "Docker compose file generated successfully"
+    else
+        log_error "Failed to generate docker-compose.yml"
+        exit 1
+    fi
+    
+    # Step 3: Verify image availability
+    log "Step 3: Verifying image availability..."
+    if ./scripts/maintenance/image-checker.sh verify --no-fail; then
+        log_success "Image verification completed"
+    else
+        log_warning "Some images failed verification, but continuing deployment"
+    fi
+    
+    log_success "Image resolution and compose generation completed"
+}
+
 # Build images
 build_images() {
     log "Building Docker images..."
@@ -736,6 +769,7 @@ clean_up() {
 main_deployment() {
     show_banner
     check_prerequisites
+    resolve_and_generate_compose
     stop_existing_containers
     build_images
     run_initialization

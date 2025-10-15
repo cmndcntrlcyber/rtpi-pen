@@ -1,7 +1,7 @@
 # RTPI-PEN: Red Team Penetration Infrastructure
 
 A comprehensive penetration testing platform providing security professionals with a complete toolkit for Red Team operations, C2 frameworks, security assessments, and automated SSL certificate management.
-
+![](https://c3s-consulting.notion.site/image/https%3A%2F%2Fprod-files-secure.s3.us-west-2.amazonaws.com%2Fb14dfce6-e02e-43c5-b633-a26dc582c1f6%2F11f9080f-b8d4-48df-8a16-767ef006b428%2FRTPI-NO-BG.png?id=92e087b7-2d26-4559-aee1-1a8442229383&table=block&spaceId=b14dfce6-e02e-43c5-b633-a26dc582c1f6&width=250&userId=&cache=v2)
 ## 🎯 What's Included
 
 ### Core Infrastructure Services
